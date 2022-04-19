@@ -28,7 +28,7 @@ MACRO compare_data address
 EOR via_t2_counter_l ; 4 +FB
 CMP address, Y       ; 4 +FE
 BEQ next             ; 3 +01
-LDA #>address        ;   +05
+LDA #>address        ;   +03
 JMP fail             ;   +05
 NOP                  ;   +08
 NOP                  ;   +09

@@ -1,45 +1,47 @@
-test_start       = &8200
+test_start       =? &8200
 
-page_start       = &00
-page_end         = &7F
+page_start       =? &00
+page_end         =? &7F
 
 via_base         = &B800
 via_t2_counter_l = via_base + &08
 via_t2_counter_h = via_base + &09
 via_acr          = via_base + &0B
 
-;; Macro exactly 16 bytes long
+;; Macro takes 11 cycles
+;;
+;; Doesn't contain any branches, so alignment doesn't matter
 
 MACRO write_data address
-.loop
 EOR via_t2_counter_l ; 4
 STA address, Y       ; 5
 NOP                  ; 2
 .next
-INY                  ; 2
-BNE loop             ; 2/3
-JMP done             ; 3
-NOP
-NOP
-NOP
-.done
 
 ENDMACRO
 
-;; Macro exactly 16 bytes long
+;; Macro takes 11 cycles (in the good case)
+;;
+;; If aligned to xxxB then the branch will not cross a page boundary
 
 MACRO compare_data address
-.loop
-EOR via_t2_counter_l ; 4
-CMP address, Y       ; 4
-BEQ next             ; 3
-JMP fail
+EOR via_t2_counter_l ; 4 +FB
+CMP address, Y       ; 4 +FE
+BEQ next             ; 3 +01
+LDA #>address        ;   +05
+JMP fail             ;   +05
+NOP                  ;   +08
+NOP                  ;   +09
+NOP                  ;   +0A
 .next
-INY                  ; 2
-BNE loop             ; 2/3
-.done
-BIT &00              ; 3
 ENDMACRO
+
+MACRO make_aligned
+      JMP align
+      ALIGN 16
+.align
+ENDMACRO
+
 
 MACRO out_message screen,message
       LDX #&00
@@ -94,11 +96,32 @@ ENDMACRO
     EQUW (test_end - test_start)
 
 .test
+    JMP RST_HANDLER
+
+.IRQ_HANDLER
+    out_message &8000, msg_irq
+    JMP halt
+
+.NMI_HANDLER
+    out_message &8000, msg_nmi
+    JMP halt
+
+.RST_HANDLER
 
 ;; reset the stack
     LDX #&FF
     TXS
 
+;; disable interrupts
+    SEI
+
+;; initialize the hardware (as the Atom Reset handler would)
+   LDA #&8A
+   STA &B003
+   LDA #&07
+   STA &B002
+   LDA #&00
+   STA &B000
 
 ;; Clear the screen
 
@@ -113,8 +136,8 @@ ENDMACRO
 ;; Print the fixed data
 
     out_message &8000, msg_title
-    out_message &8020, msg_fixed
-    out_message &8040, msg_data
+    out_message &8040, msg_fixed
+    out_message &8060, msg_data
 
     LDA #&20        ; pass 1 doesn't use the t1 timer
 
@@ -127,45 +150,44 @@ ENDMACRO
 
     LDA pattern_list, X
     TAY
-    out_hex_y &8046
+    out_hex_y &8068
 
-;; Align on a 16 byte boundary to avoid page crossing cycles in inner loops
-
-   JMP aligned
-ALIGN &10
-.aligned
-
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
     LDA pattern_list, X
     LDY #&00
     STY via_t2_counter_l
     STY via_t2_counter_h
 
-;; Still 16-byte aligned
+.write_loop
 
 FOR page, page_start, page_end
     write_data page * &100
 NEXT
 
-;; Still 16-byte aligned
+    make_aligned
+    INY
+    BEQ write_done
+    JMP write_loop
+.write_done
 
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
+;; Aligned to xxx0
+    make_aligned
     LDA pattern_list, X
     LDY #&00
     STY via_t2_counter_l
     STY via_t2_counter_h
+;; Aligned to xxxB
+
+.compare_loop
 
 FOR page, page_start, page_end
     compare_data page * &100
 NEXT
+
+    make_aligned
+    INY
+    BEQ compare_done
+    JMP compare_loop
+.compare_done
 
     INX
     CPX #pattern_list_end - pattern_list
@@ -177,17 +199,29 @@ NEXT
     AND #&20
     BEQ pass
 
-    out_message &8020, msg_rolling
+    out_message &8040, msg_random
+    out_message &8060, msg_seed
 
     LDA #&00
     JMP test_loop1
 
 .pass
-    out_message &8060, msg_passed
+    out_message &80A0, msg_passed
     JMP halt
 
 .fail
-    out_message &8060, msg_failed
+    ;; A = high byte of failed address
+    ;; Y = low byte of failed address
+
+    ;;                 A C
+    ;; 8060: FAILED AT AAYY
+    TAX
+    out_hex_y &80AC
+    TXA
+    TAY
+    out_hex_y &80AA
+
+    out_message &80A0, msg_failed
 
 .halt
     JMP halt
@@ -200,12 +234,16 @@ NEXT
     EQUS "PASS 1: FIXED DATA"
     EQUB 0
 
-.msg_rolling
-    EQUS "PASS 2: ROLLING DATA"
+.msg_random
+    EQUS "PASS 2: RANDOM DATA"
     EQUB 0
 
 .msg_data
-    EQUS "DATA: "
+    EQUS "  DATA: "
+    EQUB 0
+
+.msg_seed
+    EQUS "  SEED: "
     EQUB 0
 
 .msg_passed
@@ -213,7 +251,15 @@ NEXT
     EQUB 0
 
 .msg_failed
-    EQUS "FAILED"
+    EQUS "FAILED AT "
+    EQUB 0
+
+.msg_irq
+    EQUS "IRQ!!"
+    EQUB 0
+
+.msg_nmi
+    EQUS "NMI!!"
     EQUB 0
 
 .pattern_list
@@ -222,23 +268,29 @@ NEXT
     EQUB &55
     EQUB &AA
     EQUB &01
-    EQUB &FE
     EQUB &02
-    EQUB &FD
     EQUB &04
-    EQUB &FB
     EQUB &08
-    EQUB &F7
     EQUB &10
-    EQUB &EF
     EQUB &20
-    EQUB &DF
     EQUB &40
-    EQUB &BF
     EQUB &80
+    EQUB &FE
+    EQUB &FD
+    EQUB &FB
+    EQUB &F7
+    EQUB &EF
+    EQUB &DF
+    EQUB &BF
     EQUB &7F
 .pattern_list_end
 
+
+ORG test_start + &FFA
+    EQUW NMI_HANDLER
+    EQUW RST_HANDLER
+    EQUW IRQ_HANDLER
+
 .test_end
 
-SAVE    "RAMTEST", test_start - 22, test_end
+SAVE    "", test_start - 22, test_end

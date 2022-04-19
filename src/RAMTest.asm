@@ -136,8 +136,22 @@ ENDMACRO
 ;; Print the fixed data
 
     out_message &8000, msg_title
-    out_message &8040, msg_fixed
-    out_message &8060, msg_data
+    out_message &8040, msg_testing
+    out_message &8080, msg_running
+    out_message &80C0, msg_fixed
+    out_message &80E0, msg_data
+
+;; Print the test parameters
+
+    ;; 0123456789abcdef0123456789abcdef
+    ;; TESTING #0000-#FFFF"
+    ;; RUNNING FROM #0000"
+    LDY #page_start
+    out_hex_y &8049
+    LDY #page_end
+    out_hex_y &804F
+    LDY #>test_start
+    out_hex_y &808E
 
     LDA #&20        ; pass 1 doesn't use the t1 timer
 
@@ -150,7 +164,7 @@ ENDMACRO
 
     LDA pattern_list, X
     TAY
-    out_hex_y &8068
+    out_hex_y &80E8
 
     LDA pattern_list, X
     LDY #&00
@@ -199,14 +213,14 @@ NEXT
     AND #&20
     BEQ pass
 
-    out_message &8040, msg_random
-    out_message &8060, msg_seed
+    out_message &80C0, msg_random
+    out_message &80E0, msg_seed
 
     LDA #&00
     JMP test_loop1
 
 .pass
-    out_message &80A0, msg_passed
+    out_message &8120, msg_passed
     JMP halt
 
 .fail
@@ -216,18 +230,26 @@ NEXT
     ;;                 A C
     ;; 8060: FAILED AT AAYY
     TAX
-    out_hex_y &80AC
+    out_hex_y &812C
     TXA
     TAY
-    out_hex_y &80AA
+    out_hex_y &812A
 
-    out_message &80A0, msg_failed
+    out_message &8120, msg_failed
 
 .halt
     JMP halt
 
 .msg_title
     EQUS "ATOM RAM TEST"
+    EQUB 0
+
+.msg_testing
+    EQUS "TESTING #0000-#FFFF"
+    EQUB 0
+
+.msg_running
+    EQUS "RUNNING FROM #0000"
     EQUB 0
 
 .msg_fixed

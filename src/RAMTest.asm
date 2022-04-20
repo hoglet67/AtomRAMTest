@@ -233,18 +233,6 @@ ENDMACRO
     out_message row_fixed,   msg_fixed
     out_message row_data,    msg_data
 
-;; Print the test parameters (page_start, page_end, test_start)
-
-    ;; 0123456789abcdef0123456789abcdef
-    ;; TESTING #0000-#FFFF"
-    ;; RUNNING FROM #0000"
-    LDY #page_start
-    out_hex_y row_testing+&09
-    LDY #page_end
-    out_hex_y row_testing+&0F
-    LDY #>test_start
-    out_hex_y row_running+&0E
-
     ;; In pass 1 the VIA T2 counter is set to pulse counting mode
     ;; (VIA ACR=0x20) so it doesn't change, and then the counter is cleared.
     ;;
@@ -388,11 +376,21 @@ NEXT
     EQUB 0
 
 .msg_testing
-    EQUS "TESTING #0000-#FFFF"
+    EQUS "TESTING #"
+    EQUS STR$~(page_start DIV &10 MOD &10)
+    EQUS STR$~(page_start         MOD &10)
+    EQUS "00-#"
+    EQUS STR$~(page_end  DIV &10 MOD &10)
+    EQUS STR$~(page_end          MOD &10)
+    EQUS "FF"
     EQUB 0
 
 .msg_running
-    EQUS "RUNNING FROM #0000"
+    EQUS "RUNNING FROM #"
+    EQUS STR$~(test_start DIV &1000 MOD &10)
+    EQUS STR$~(test_start DIV &0100 MOD &10)
+    EQUS STR$~(test_start DIV &0010 MOD &10)
+    EQUS STR$~(test_start           MOD &10)
     EQUB 0
 
 .msg_fixed

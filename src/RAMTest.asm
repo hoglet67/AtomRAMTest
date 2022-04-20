@@ -462,4 +462,4 @@ ORG test_start + &FFA
 
 .test_end
 
-SAVE    "", test_start - 22, test_end
+SAVE     test_start - 22, test_end

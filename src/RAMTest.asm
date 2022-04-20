@@ -19,14 +19,18 @@ test_start       =? &8200
 page_start       =? &00
 page_end         =? &7F
 
+;; Screen
+screen_base      =? &8000
+
+;; Screen init
+screen_init      =? &00
+
 ;; The Atom's VIA T2 counter is used as a source of pseudo-random(ish) data.
 via_base         = &B800
 via_t2_counter_l = via_base + &08
 via_t2_counter_h = via_base + &09
 via_acr          = via_base + &0B
 
-;; Screen
-screen_base      = &8000
 
 row_title        = screen_base + &00
 row_testing      = screen_base + &40
@@ -46,20 +50,23 @@ row_result       = screen_base + &120
 ;; so the value in A is written directly.
 ;;
 ;; In the second pass of the test, the VIA T2 counter is free-running,
-;; so the value in A is perturbed by EORing with the current counter
+;; so the value in A is perturbed by ADCing with the current counter
 ;; value, which gives a pseudo-random(ish) stream of data.
 ;;
-;; This macro is 7 bytes and is cascaded 128 times (once for each page
-;; begin tested) which adds up to 896 bytes.
+;; This macro is 10 bytes and is cascaded 128 times (once for each page
+;; begin tested) which adds up to 1280 bytes.
 ;;
-;; This macro takes 11 cycles, regardless of alignment.
+;; This macro takes 15 cycles, regardless of alignment.
 ;;
-;; (11 is a prime number, which helps avoid obvious repeating patterns)
+;; (15 is not a power of 2, which helps avoid obvious repeating patterns)
+
+;; Entered with C=1, exits with C=1
 
 MACRO write_data address
-EOR via_t2_counter_l ; 4
+ADC via_t2_counter_l ; 4 - pass 1: T2-L loaded with FF, so A unchanged
+ADC via_t2_counter_h ; 4 - pass 1: T2-H loaded with FF, so A unchanged
 STA address, Y       ; 5
-NOP                  ; 2
+SEC                  ; 2
 ENDMACRO
 
 ;; The compare_data macro compares the data in a memory page to a reference
@@ -77,20 +84,20 @@ ENDMACRO
 ;; This macro is 16 bytes and is cascaded 128 times (once for each page
 ;; begin tested) which adds up to 2048 bytes.
 ;;
-;; This macro takes 11 cycles, in the happy case, and if the bramch
+;; This macro takes 15 cycles, in the happy case, and if the bramch
 ;; does not cross a page boundary.
 ;;
-;; If aligned to xxxB then the branch will neve cross a page boundary
+;; If aligned to xxxA then the branch will neve cross a page boundary
+
+;; Entered with C=1, exits with C=1
 
 MACRO compare_data address
-EOR via_t2_counter_l ; 4 +FB
-CMP address, Y       ; 4 +FE
-BEQ next             ; 3 +01
-LDA #>address        ;   +03
-JMP fail             ;   +05
-NOP                  ;   +08
-NOP                  ;   +09
-NOP                  ;   +0A
+ADC via_t2_counter_l ; 4 +FA - pass 1: T2-L loaded with FF, so A unchanged
+ADC via_t2_counter_h ; 4 +FD - pass 2: T2-L loaded with FF, so A unchanged
+CMP address, Y       ; 4 +00
+BEQ next             ; 3 +03 ;; C=1 if branch taken
+LDA #>address        ;   +05
+JMP fail             ;   +07
 .next
 ENDMACRO
 
@@ -202,7 +209,7 @@ ENDMACRO
    STA &B003
    LDA #&07
    STA &B002
-   LDA #&00
+   LDA #screen_init
    STA &B000
 
 ;; Clear the screen
@@ -265,9 +272,11 @@ ENDMACRO
     LDA pattern_list, X
 
     ;; At the start of a write pass, reset the VIA T2 counter to a deterministic state
-    LDY #&00
+    SEC
+    LDY #&FF
     STY via_t2_counter_l
     STY via_t2_counter_h
+    INY
 
 .write_loop
 
@@ -286,20 +295,22 @@ NEXT
     JMP write_loop
 .write_done
 
+    ;; The compare_data macro requires the data to be checked to be in A
+    LDA pattern_list, X
+
     ;; We are now ready to read back and compare the written data...
 
     ;; Make sure we start 16-byte aligned (xxx0)
     make_aligned
 
-    ;; The compare_data macro requires the data to be checked to be in A
-    LDA pattern_list, X
-
     ;; At the start of a compare pass, reset the VIA T2 counter to a deterministic state
-    LDY #&00
+    SEC
+    LDY #&FF
     STY via_t2_counter_l
     STY via_t2_counter_h
+    INY
 
-    ;; Now aligned to xxxB, so the branch within compare_data never crosses a page boundary
+    ;; Now aligned to xxxA, so the branch within compare_data never crosses a page boundary
 
 .compare_loop
 

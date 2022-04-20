@@ -118,11 +118,6 @@ MACRO out_message screen,message
 .loop
       LDA message, X
       BEQ done
-      CLC
-      ADC #&20
-      BMI skipeor
-      EOR #&60
-.skipeor
       STA screen, X
       INX
       BNE loop
@@ -370,6 +365,8 @@ NEXT
 ;; ******************************************************************
 ;; Text Messages
 ;; ******************************************************************
+
+MAPCHAR &40,&5F,&00
 
 .msg_title
     EQUS "ATOM RAM TEST"

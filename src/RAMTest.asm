@@ -25,6 +25,16 @@ via_t2_counter_l = via_base + &08
 via_t2_counter_h = via_base + &09
 via_acr          = via_base + &0B
 
+;; Screen
+screen_base      = &8000
+
+row_title        = screen_base + &00
+row_testing      = screen_base + &40
+row_running      = screen_base + &80
+row_fixed        = screen_base + &C0
+row_data         = screen_base + &E0
+row_result       = screen_base + &120
+
 ;; ******************************************************************
 ;; Macros
 ;; ******************************************************************
@@ -166,13 +176,13 @@ ENDMACRO
 ;; We don't expect IRQ to occur, but just in case....
 
 .IRQ_HANDLER
-    out_message &8000, msg_irq
+    out_message row_title, msg_irq
     JMP halt
 
 ;; We don't expect NMI to occur, but just in case....
 
 .NMI_HANDLER
-    out_message &8000, msg_nmi
+    out_message row_title, msg_nmi
     JMP halt
 
 ;; The main RAM Test Program should also act as a valid 6502 reset handler
@@ -200,18 +210,18 @@ ENDMACRO
     LDA #&20
     LDX #&00
 .clear_loop
-    STA &8000, X
-    STA &8100, X
+    STA screen_base, X
+    STA screen_base + &100, X
     INX
     BNE clear_loop
 
 ;; Print the fixed messages
 
-    out_message &8000, msg_title
-    out_message &8040, msg_testing
-    out_message &8080, msg_running
-    out_message &80C0, msg_fixed
-    out_message &80E0, msg_data
+    out_message row_title,   msg_title
+    out_message row_testing, msg_testing
+    out_message row_running, msg_running
+    out_message row_fixed,   msg_fixed
+    out_message row_data,    msg_data
 
 ;; Print the test parameters (page_start, page_end, test_start)
 
@@ -219,11 +229,11 @@ ENDMACRO
     ;; TESTING #0000-#FFFF"
     ;; RUNNING FROM #0000"
     LDY #page_start
-    out_hex_y &8049
+    out_hex_y row_testing+&09
     LDY #page_end
-    out_hex_y &804F
+    out_hex_y row_testing+&0F
     LDY #>test_start
-    out_hex_y &808E
+    out_hex_y row_running+&0E
 
     ;; In pass 1 the VIA T2 counter is set to pulse counting mode
     ;; (VIA ACR=0x20) so it doesn't change, and then the counter is cleared.
@@ -249,7 +259,7 @@ ENDMACRO
     ;; Output the current pattern to the right place on the screen
     LDA pattern_list, X
     TAY
-    out_hex_y &80E8
+    out_hex_y row_data+&08
 
     ;; The write_data macro requires the write data to be in A
     LDA pattern_list, X
@@ -324,8 +334,8 @@ NEXT
     BEQ success
 
     ;; Update the screen to show pass 2 (random data)
-    out_message &80C0, msg_random
-    out_message &80E0, msg_seed
+    out_message row_fixed, msg_random
+    out_message row_data, msg_seed
 
     ;; A will be written to the ACR so VIA T2 is in free-running mode in pass 2
     LDA #&00
@@ -333,7 +343,7 @@ NEXT
 
 .success
     ;; Yeeehhh! All the tests have passed
-    out_message &8120, msg_passed
+    out_message row_result, msg_passed
     JMP halt
 
 .fail
@@ -344,12 +354,12 @@ NEXT
     ;; 0123456789abcdef0123456789abcdef
     ;; FAILED AT AAYY
     TAX
-    out_hex_y &812C
+    out_hex_y row_result+&0C
     TXA
     TAY
-    out_hex_y &812A
+    out_hex_y row_result+&0A
 
-    out_message &8120, msg_failed
+    out_message row_result, msg_failed
 
 .halt
     ;; Loop forever....

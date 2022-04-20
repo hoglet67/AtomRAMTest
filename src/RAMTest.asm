@@ -177,6 +177,9 @@ ENDMACRO
 ;; Start of main RAM Test program
 ;; ******************************************************************
 
+   ORG test_start
+   GUARD test_start + &FFA
+
 .test
     JMP RST_HANDLER
 
@@ -455,7 +458,12 @@ NEXT
 ;; 6502 Vectors (at the end of the 4K ROM)
 ;; ******************************************************************
 
-ORG test_start + &FFA
+    PRINT "Free Space: ", test_start + &FFA - pattern_list_end
+
+    CLEAR test_start + &FFA, test_start + &FFF
+
+    ORG test_start + &FFA
+
     EQUW NMI_HANDLER
     EQUW RST_HANDLER
     EQUW IRQ_HANDLER

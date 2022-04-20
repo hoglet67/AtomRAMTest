@@ -113,13 +113,14 @@ ENDMACRO
 ;; to screen memory, translating the ASCII characters to 6847 character
 ;; codes on the fly.
 
-MACRO out_message screen,message
-      LDX #&00
+MACRO out_message screen
+      LDY #&00
 .loop
-      LDA message, X
+      LDA messages, X
       BEQ done
-      STA screen, X
+      STA screen, Y
       INX
+      INY
       BNE loop
 .done
 ENDMACRO
@@ -176,57 +177,49 @@ ENDMACRO
    GUARD test_start + &FFA
 
 .test
-    JMP RST_HANDLER
-
-;; We don't expect IRQ to occur, but just in case....
-
-.IRQ_HANDLER
-    out_message row_title, msg_irq
-    JMP halt
-
-;; We don't expect NMI to occur, but just in case....
-
-.NMI_HANDLER
-    out_message row_title, msg_nmi
-    JMP halt
 
 ;; The main RAM Test Program should also act as a valid 6502 reset handler
 
 .RST_HANDLER
 
+;; disable interrupts
+    SEI
+
 ;; reset the stack pointer (even though it's not used, just in case)
 ;; (for debugging it helps to replace the JMP in compare_data with JSR)
     LDX #&FF
     TXS
-
-;; disable interrupts
-    SEI
-
-;; initialize the Atom 8255 PIA (exactly as the Atom Reset handler would)
-   LDA #&8A
-   STA &B003
-   LDA #&07
-   STA &B002
-   LDA #screen_init
-   STA &B000
+    INX
 
 ;; Clear the screen
 
     LDA #&20
-    LDX #&00
 .clear_loop
     STA screen_base, X
     STA screen_base + &100, X
     INX
     BNE clear_loop
 
+;; initialize the Atom 8255 PIA (exactly as the Atom Reset handler would)
+    LDA #&8A
+    STA &B003
+    LDA #&07
+    STA &B002
+    LDA #screen_init
+    STA &B000
+
 ;; Print the fixed messages
 
-    out_message row_title,   msg_title
-    out_message row_testing, msg_testing
-    out_message row_running, msg_running
-    out_message row_fixed,   msg_fixed
-    out_message row_data,    msg_data
+    LDX #(msg_title - messages)
+    out_message row_title
+    INX
+    out_message row_testing
+    INX
+    out_message row_running
+    INX
+    out_message row_fixed
+    INX
+    out_message row_data
 
     ;; In pass 1 the VIA T2 counter is set to pulse counting mode
     ;; (VIA ACR=0x20) so it doesn't change, and then the counter is cleared.
@@ -331,8 +324,10 @@ NEXT
     BEQ success
 
     ;; Update the screen to show pass 2 (random data)
-    out_message row_fixed, msg_random
-    out_message row_data, msg_seed
+    LDX #(msg_random - messages)
+    out_message row_fixed
+    INX
+    out_message row_data
 
     ;; A will be written to the ACR so VIA T2 is in free-running mode in pass 2
     LDA #&00
@@ -340,8 +335,8 @@ NEXT
 
 .success
     ;; Yeeehhh! All the tests have passed
-    out_message row_result, msg_passed
-    JMP halt
+    LDX #(msg_passed - messages)
+    BNE halt_message
 
 .fail
     ;; Boooh! One of the tests has failed, at this point the compare_data macro has set:
@@ -356,17 +351,36 @@ NEXT
     TAY
     out_hex_y row_result+&0A
 
-    out_message row_result, msg_failed
+    LDX #(msg_failed - messages)
+    ;; Fall through to...
+
+.halt_message
+    ;; Output final message
+    out_message row_result
 
 .halt
     ;; Loop forever....
-    JMP halt
+    BEQ halt
+
+;; We don't expect IRQ to occur, but just in case....
+
+.IRQ_HANDLER
+    LDX #(msg_irq - messages)
+    BNE halt_message
+
+;; We don't expect NMI to occur, but just in case....
+
+.NMI_HANDLER
+    LDX #(msg_nmi - messages)
+    BNE halt_message
 
 ;; ******************************************************************
 ;; Text Messages
 ;; ******************************************************************
 
 MAPCHAR &40,&5F,&00
+
+.messages
 
 .msg_title
     EQUS "ATOM RAM TEST"
@@ -394,12 +408,12 @@ MAPCHAR &40,&5F,&00
     EQUS "PASS 1: FIXED DATA"
     EQUB 0
 
-.msg_random
-    EQUS "PASS 2: RANDOM DATA"
-    EQUB 0
-
 .msg_data
     EQUS "  DATA: "
+    EQUB 0
+
+.msg_random
+    EQUS "PASS 2: RANDOM DATA"
     EQUB 0
 
 .msg_seed

@@ -1,28 +1,76 @@
+;; ******************************************************************
+;; Atom RAM Test
+;;
+;; This program is a RAM test for the Acorn Atom
+;;
+;; It allows the whole of the lower text area (0x0000-0x7FFF) to be
+;; tested with both fixed data and pseudo random (ish) data.
+;;
+;; It can be run from ROM (for example, replacing the Atom Kernel)
+;; and it doesn't make any use at all of Page Zero or the Stack
+;; (as the RAM there may itself be faulty).
+;;
+;; ******************************************************************
+
+;; The code is assembled from this address, which is passed in from build.sh
 test_start       =? &8200
 
+;; The start/end pages in RAM that are tested
 page_start       =? &00
 page_end         =? &7F
 
+;; The Atom's VIA T2 counter is used as a source of pseudo-random(ish) data.
 via_base         = &B800
 via_t2_counter_l = via_base + &08
 via_t2_counter_h = via_base + &09
 via_acr          = via_base + &0B
 
-;; Macro takes 11 cycles
+;; ******************************************************************
+;; Macros
+;; ******************************************************************
+
+;; The write_data macro writes a byte of data (in A) to an offset in
+;; a memory page, using Y as the index within the page.
 ;;
-;; Doesn't contain any branches, so alignment doesn't matter
+;; In the first pass of the test, the VIA T2 counter is forced to zero,
+;; so the value in A is written directly.
+;;
+;; In the second pass of the test, the VIA T2 counter is free-running,
+;; so the value in A is perturbed by EORing with the current counter
+;; value, which gives a pseudo-random(ish) stream of data.
+;;
+;; This macro is 7 bytes and is cascaded 128 times (once for each page
+;; begin tested) which adds up to 896 bytes.
+;;
+;; This macro takes 11 cycles, regardless of alignment.
+;;
+;; (11 is a prime number, which helps avoid obvious repeating patterns)
 
 MACRO write_data address
 EOR via_t2_counter_l ; 4
 STA address, Y       ; 5
 NOP                  ; 2
-.next
-
 ENDMACRO
 
-;; Macro takes 11 cycles (in the good case)
+;; The compare_data macro compares the data in a memory page to a reference
+;; value (in A), using Y as the index within the page.
 ;;
-;; If aligned to xxxB then the branch will not cross a page boundary
+;; This macro mirrors the read_data macro
+;;
+;; In the second pass, it's critical that the VIA T2 counter values
+;; exactly match those used when the data was written. This means the
+;; macro must also take exactly 11 cycles. As it contains a forward
+;; branch instruction, this must never cross a page boundary. The
+;; easiest way to guarantee this is to pad the macro to 16 bytes,
+;; and then carefully pick an initial alignment.
+;;
+;; This macro is 16 bytes and is cascaded 128 times (once for each page
+;; begin tested) which adds up to 2048 bytes.
+;;
+;; This macro takes 11 cycles, in the happy case, and if the bramch
+;; does not cross a page boundary.
+;;
+;; If aligned to xxxB then the branch will neve cross a page boundary
 
 MACRO compare_data address
 EOR via_t2_counter_l ; 4 +FB
@@ -36,12 +84,17 @@ NOP                  ;   +0A
 .next
 ENDMACRO
 
+;; The make_aligned macro forces the next instruction to be 16-byte aligned
+
 MACRO make_aligned
       JMP align
       ALIGN 16
 .align
 ENDMACRO
 
+;; The out_message macro writes a zero-terminated message directly
+;; to screen memory, translating the ASCII characters to 6847 character
+;; codes on the fly.
 
 MACRO out_message screen,message
       LDX #&00
@@ -59,10 +112,11 @@ MACRO out_message screen,message
 .done
 ENDMACRO
 
+;; The out_hex_digit macro writes a single hex digit in A (00-0F) to
+;; screen memory, converting to 6847 character codes on the fly:
+;;   00->09 => 30->39
+;;   0A->0F => 01->06
 
-;; Convert a hex digit in A (00-0F) to Screen ASCII
-;; 00->09 => 30->39
-;; 0A->0F => 01->06
 MACRO out_hex_digit screen
       CMP #&0A
       BCC digit09
@@ -73,6 +127,9 @@ MACRO out_hex_digit screen
 .digitAF
       STA screen
 ENDMACRO
+
+;; The out_hex_y macro writes two hex digits in Y (00-FF) to
+;; screen memory, using the above out_hex_digit for each nibble.
 
 MACRO out_hex_y screen
       TYA
@@ -86,6 +143,10 @@ MACRO out_hex_y screen
       out_hex_digit screen+1
 ENDMACRO
 
+;; ******************************************************************
+;; Atom ATM file Header
+;; ******************************************************************
+
     ORG test_start-22
 
 .atm_header
@@ -95,27 +156,38 @@ ENDMACRO
     EQUW test_start
     EQUW (test_end - test_start)
 
+;; ******************************************************************
+;; Start of main RAM Test program
+;; ******************************************************************
+
 .test
     JMP RST_HANDLER
+
+;; We don't expect IRQ to occur, but just in case....
 
 .IRQ_HANDLER
     out_message &8000, msg_irq
     JMP halt
 
+;; We don't expect NMI to occur, but just in case....
+
 .NMI_HANDLER
     out_message &8000, msg_nmi
     JMP halt
 
+;; The main RAM Test Program should also act as a valid 6502 reset handler
+
 .RST_HANDLER
 
-;; reset the stack
+;; reset the stack pointer (even though it's not used, just in case)
+;; (for debugging it helps to replace the JMP in compare_data with JSR)
     LDX #&FF
     TXS
 
 ;; disable interrupts
     SEI
 
-;; initialize the hardware (as the Atom Reset handler would)
+;; initialize the Atom 8255 PIA (exactly as the Atom Reset handler would)
    LDA #&8A
    STA &B003
    LDA #&07
@@ -133,7 +205,7 @@ ENDMACRO
     INX
     BNE clear_loop
 
-;; Print the fixed data
+;; Print the fixed messages
 
     out_message &8000, msg_title
     out_message &8040, msg_testing
@@ -141,7 +213,7 @@ ENDMACRO
     out_message &80C0, msg_fixed
     out_message &80E0, msg_data
 
-;; Print the test parameters
+;; Print the test parameters (page_start, page_end, test_start)
 
     ;; 0123456789abcdef0123456789abcdef
     ;; TESTING #0000-#FFFF"
@@ -153,82 +225,124 @@ ENDMACRO
     LDY #>test_start
     out_hex_y &808E
 
-    LDA #&20        ; pass 1 doesn't use the t1 timer
+    ;; In pass 1 the VIA T2 counter is set to pulse counting mode
+    ;; (VIA ACR=0x20) so it doesn't change, and then the counter is cleared.
+    ;;
+    ;; In pass 2 the VIA T2 counter is set to free running counter mode
+    ;; (VIA ACR=0x00) so it decrements at 1MHz.
+    ;;
+    ;; This causes the test data in pass 2 to be psuedo-random(ish)
+    ;;
+    ;; The ACR is also in effect tracking whether we are in pass 1 or 2
+    ;; (as we don't want to assume any RAM is useable).
+
+    LDA #&20
 
 .test_loop1
     STA via_acr
 
-    LDX #&00        ; iterator for fixed patterns
+    ;; X is the loop iterator for the differnt fixed patterns
+    LDX #&00
 
 .test_loop2
 
+    ;; Output the current pattern to the right place on the screen
     LDA pattern_list, X
     TAY
     out_hex_y &80E8
 
+    ;; The write_data macro requires the write data to be in A
     LDA pattern_list, X
+
+    ;; At the start of a write pass, reset the VIA T2 counter to a deterministic state
     LDY #&00
     STY via_t2_counter_l
     STY via_t2_counter_h
 
 .write_loop
 
+    ;; Cascade the write_data macro N times, once per page being tested
+    ;; A = test data value
+    ;; Y = index within the page
 FOR page, page_start, page_end
     write_data page * &100
 NEXT
 
+    ;; Loop back for the next index (Y) within the page. 16-byte alignment is
+    ;; important here to avoid the done branch crossing a page)
     make_aligned
     INY
     BEQ write_done
     JMP write_loop
 .write_done
 
-;; Aligned to xxx0
+    ;; We are now ready to read back and compare the written data...
+
+    ;; Make sure we start 16-byte aligned (xxx0)
     make_aligned
+
+    ;; The compare_data macro requires the data to be checked to be in A
     LDA pattern_list, X
+
+    ;; At the start of a compare pass, reset the VIA T2 counter to a deterministic state
     LDY #&00
     STY via_t2_counter_l
     STY via_t2_counter_h
-;; Aligned to xxxB
+
+    ;; Now aligned to xxxB, so the branch within compare_data never crosses a page boundary
 
 .compare_loop
 
+    ;; Cascade the compare_data macro N times, once per page being tested
+    ;; A = reference data value
+    ;; Y = index within the page
 FOR page, page_start, page_end
     compare_data page * &100
 NEXT
 
+    ;; Loop back for the next index (Y) within the page. 16-byte alignment is
+    ;; important here to avoid the done branch crossing a page)
     make_aligned
     INY
     BEQ compare_done
     JMP compare_loop
 .compare_done
 
+    ;; All the time critical stuff is over now
+
+    ;; Move on to the next pattern
     INX
     CPX #pattern_list_end - pattern_list
     BEQ pass2
     JMP test_loop2
 
 .pass2
+    ;; The ACR (bit 5) is used to distingish pass 1 from pass 2
+    ;; (pass 1: ACR=0x20; pass 2: ACR=0x00)
     LDA via_acr
     AND #&20
-    BEQ pass
+    BEQ success
 
+    ;; Update the screen to show pass 2 (random data)
     out_message &80C0, msg_random
     out_message &80E0, msg_seed
 
+    ;; A will be written to the ACR so VIA T2 is in free-running mode in pass 2
     LDA #&00
     JMP test_loop1
 
-.pass
+.success
+    ;; Yeeehhh! All the tests have passed
     out_message &8120, msg_passed
     JMP halt
 
 .fail
+    ;; Boooh! One of the tests has failed, at this point the compare_data macro has set:
     ;; A = high byte of failed address
-    ;; Y = low byte of failed address
+    ;; Y = low  byte of failed address
 
-    ;;                 A C
-    ;; 8060: FAILED AT AAYY
+    ;; 0123456789abcdef0123456789abcdef
+    ;; FAILED AT AAYY
     TAX
     out_hex_y &812C
     TXA
@@ -238,7 +352,12 @@ NEXT
     out_message &8120, msg_failed
 
 .halt
+    ;; Loop forever....
     JMP halt
+
+;; ******************************************************************
+;; Text Messages
+;; ******************************************************************
 
 .msg_title
     EQUS "ATOM RAM TEST"
@@ -284,6 +403,10 @@ NEXT
     EQUS "NMI!!"
     EQUB 0
 
+;; ******************************************************************
+;; Pattern data
+;; ******************************************************************
+
 .pattern_list
     EQUB &00
     EQUB &FF
@@ -307,6 +430,9 @@ NEXT
     EQUB &7F
 .pattern_list_end
 
+;; ******************************************************************
+;; 6502 Vectors (at the end of the 4K ROM)
+;; ******************************************************************
 
 ORG test_start + &FFA
     EQUW NMI_HANDLER

@@ -123,12 +123,12 @@ ENDMACRO
 
 ;; The initialize_t2_counter sets the VIA t2 counter to the required value
 ;;
-;; pass 1: ACR=&A0; t2_l=FF; t2h_FF
-;; pass 2: ACR=&60; t2_l=FF; t2h_00
-;; pass 3: ACR=&00; t2_l=FF; t2h_FF
+;; pass 1: ACR=&A0; t2_h=&FF; t2_l=&FF => Data unchanged
+;; pass 2: ACR=&60; t2_h=&00; t2_l=&FF => Data incremented by one
+;; pass 3: ACR=&00; t2_h= !X; t2_l=  X => Data randomly purturbed
 ;;
 ;; must exit with:
-;;   A = pattern
+;;   A = test data/anchor/seed
 ;;   X = unchanged (it's the patten loop counter)
 ;;   Y = 00
 ;;   C = 1
@@ -138,16 +138,26 @@ ENDMACRO
 ;; Currently alignment ends up at xxx9
 
 MACRO loop_header
+    ;; Pass 1 - VIA T2 = FF FF
     LDY #&FF
-    STY via_t2_counter_l
-    BIT via_acr             ;; Bit 6 of the ACR set indicates pass 2
-    BVC store               ;; Pass 2 increment t2l from FF to 00
+    TYA
+    BIT via_acr
+    BMI store
+    BVS pass2
+    ;; Pass 3 - VIA T2 = !X  X (i.e. try to randomize the counter start as well)
+    TXA
+    TAY
+    EOR #&FF
+    BNE store
+.pass2
+    ;; Pass 2 - VIA T2 = 00 FF
     INY
 .store
     make_aligned
     SEC
-    LDA pattern_list, X
+    STA via_t2_counter_l
     STY via_t2_counter_h
+    LDA pattern_list, X
     LDY #&00
 ENDMACRO
 

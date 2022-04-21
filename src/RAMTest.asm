@@ -128,7 +128,7 @@ ENDMACRO
 ;; It sets the VIA t2 counter to the required value for that pass:
 ;;    pass 1: ACR=&A0; t2_h=&FF; t2_l=&FF => Data unchanged
 ;;    pass 2: ACR=&60; t2_h=&00; t2_l=&FF => Data incremented by one
-;;    pass 3: ACR=&00; t2_h= !X; t2_l=  X => Data randomly purturbed
+;;    pass 3: ACR=&00; t2_h=&FF; t2_l=&FF => Data randomly perturbed
 ;;
 ;; must exit with:
 ;;   A = test data/anchor/seed
@@ -138,32 +138,19 @@ ENDMACRO
 ;;
 ;; Alignment must end up between xxx5 and xxxF to avoid page crossing in write_data
 ;;
-;; Currently alignment ends up at xxx9
+;; Currently alignment ends up at xxx6
 
 MACRO loop_header
-    BIT via_acr
-    BVS pass2
-    BPL pass3
-.pass1
     ;; Pass 1 - VIA T2 = FF FF ; A = pattern
+    ;; Pass 3 - VIA T2 = FF FF ; A = pattern
     LDY #&FF
     STY via_t2_counter_l
-    BNE pattern
-.pass2
+    LDA pattern_list, X
+    BIT via_acr
+    BVC store
     ;; Pass 2 - VIA T2 = 00 FF ; A = FF
-    LDY #&FF
-    STY via_t2_counter_l
     TYA
     INY
-    BEQ store
-.pass3
-    ;; Pass 3 - VIA T2 = !X  X ; A = pattern
-    STX via_t2_counter_l
-    TXA
-    EOR #&FF
-    TAY
-.pattern
-    LDA pattern_list, X
 .store
     make_aligned
     SEC

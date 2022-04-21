@@ -61,10 +61,10 @@ row_result       = screen_base + &120
 ;; Entered with C=1, exits with C=1
 
 MACRO write_data address
-ADC via_t2_counter_l ; 4 - pass 1: T2-L loaded with FF, so A unchanged
-ADC via_t2_counter_h ; 4 - pass 1: T2-H loaded with FF, so A unchanged
-STA address, Y       ; 5
-SEC                  ; 2
+    ADC via_t2_counter_l ; 4 - pass 1: T2-L loaded with FF, so A unchanged
+    ADC via_t2_counter_h ; 4 - pass 1: T2-H loaded with FF, so A unchanged
+    STA address, Y       ; 5
+    SEC                  ; 2
 ENDMACRO
 
 ;; The compare_data macro compares the data in a memory page to a reference
@@ -90,20 +90,20 @@ ENDMACRO
 ;; Entered with C=1, exits with C=1
 
 MACRO compare_data address
-ADC via_t2_counter_l ; 4 +FA - pass 1: T2-L loaded with FF, so A unchanged
-ADC via_t2_counter_h ; 4 +FD - pass 2: T2-L loaded with FF, so A unchanged
-CMP address, Y       ; 4 +00
-BEQ next             ; 3 +03 ;; C=1 if branch taken
-LDA #>address        ;   +05
-JMP fail             ;   +07
+    ADC via_t2_counter_l ; 4 +FA - pass 1: T2-L loaded with FF, so A unchanged
+    ADC via_t2_counter_h ; 4 +FD - pass 2: T2-L loaded with FF, so A unchanged
+    CMP address, Y       ; 4 +00
+    BEQ next             ; 3 +03 ;; C=1 if branch taken
+    LDA #>address        ;   +05
+    JMP fail             ;   +07
 .next
 ENDMACRO
 
 ;; The make_aligned macro forces the next instruction to be 16-byte aligned
 
 MACRO make_aligned
-      JMP align
-      ALIGN 16
+    JMP align
+    ALIGN 16
 .align
 ENDMACRO
 
@@ -112,14 +112,14 @@ ENDMACRO
 ;; codes on the fly.
 
 MACRO out_message screen
-      LDY #&00
+    LDY #&00
 .loop
-      LDA messages, X
-      BEQ done
-      STA screen, Y
-      INX
-      INY
-      BNE loop
+    LDA messages, X
+    BEQ done
+    STA screen, Y
+    INX
+    INY
+    BNE loop
 .done
 ENDMACRO
 
@@ -128,20 +128,20 @@ ENDMACRO
 
 MACRO out_message_multiline screen
 .loop
-      LDA messages, X
-      BEQ done
-      BMI newline
-      STA screen, Y
-      INY
+    LDA messages, X
+    BEQ done
+    BMI newline
+    STA screen, Y
+    INY
 .next
-      INX
-      BNE loop
+    INX
+    BNE loop
 .newline
-      TYA
-      ADC #&20
-      AND #&E0
-      TAY
-      BNE next
+    TYA
+    ADC #&20
+    AND #&E0
+    TAY
+    BNE next
 .done
 ENDMACRO
 
@@ -151,27 +151,27 @@ ENDMACRO
 ;;   0A->0F => 01->06
 
 MACRO out_hex_digit screen
-      ORA #&30
-      CMP #&3A
-      BCC store
-      SBC #&39
+    ORA #&30
+    CMP #&3A
+    BCC store
+    SBC #&39
 .store
-      STA screen
+    STA screen
 ENDMACRO
 
 ;; The out_hex_y macro writes two hex digits in Y (00-FF) to
 ;; screen memory, using the above out_hex_digit for each nibble.
 
 MACRO out_hex_y screen
-      TYA
-      LSR A
-      LSR A
-      LSR A
-      LSR A
-      out_hex_digit screen
-      TYA
-      AND #&0F
-      out_hex_digit screen+1
+    TYA
+    LSR A
+    LSR A
+    LSR A
+    LSR A
+    out_hex_digit screen
+    TYA
+    AND #&0F
+    out_hex_digit screen+1
 ENDMACRO
 
 ;; ******************************************************************

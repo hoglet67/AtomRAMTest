@@ -165,7 +165,11 @@ MACRO loop_footer loop_start
     make_aligned
     BIT via_acr             ;; Bit 7 of the ACR set indicates pass 1
     BMI skip_correction     ;; Pass 2/3 correct test data at end of each col
+IF (screen_base = &8000)
     SBC #(page_end - page_start + 2)
+ELSE
+    SBC #(page_end - page_start + 1)
+ENDIF
     CLC
     ADC increment_list, X
     SEC
@@ -355,7 +359,9 @@ ENDMACRO
 .write_loop
 
     ;; First write sample to the bottom half of the screen to keep it interesting!
+IF (screen_base = &8000)
     write_data &8100
+ENDIF
 
     ;; Cascade the write_data macro N times, once per page being tested
     ;; A = test data value
@@ -376,7 +382,9 @@ NEXT
 .compare_loop
 
     ;; First compare sample in bottom half of the screen
+IF (screen_base = &8000)
     compare_data &8100
+ENDIF
 
     ;; Cascade the compare_data macro N times, once per page being tested
     ;; A = reference data value

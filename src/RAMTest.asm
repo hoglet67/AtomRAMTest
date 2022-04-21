@@ -4,7 +4,7 @@
 ;; This program is a RAM test for the Acorn Atom
 ;;
 ;; It allows the whole of the lower text area (0x0000-0x7FFF) to be
-;; tested with both fixed data and pseudo random (ish) data.
+;; tested with fixed, variable and pseudo random (ish) data.
 ;;
 ;; It can be run from ROM (for example, replacing the Atom Kernel)
 ;; and it doesn't make any use at all of Page Zero or the Stack
@@ -19,16 +19,18 @@ test_start       =? &8200
 page_start       =? &00
 page_end         =? &7F
 
-;; Screen
+;; Screen base address
 screen_base      =? &8000
 
-;; Screen init
+;; Screen initialization value (8255 PIA port A at #B000)
 screen_init      =? &00
 
 ;; The Atom's VIA T2 counter is used as a source of pseudo-random(ish) data.
 via_base         = &B800
 via_t2_counter_l = via_base + &08
 via_t2_counter_h = via_base + &09
+
+;; The Atom's ACR is used in interesting ways (!!)
 via_acr          = via_base + &0B
 
 ;; Screen addresses for particular messages
@@ -121,11 +123,12 @@ MACRO make_aligned
 .align
 ENDMACRO
 
-;; The initialize_t2_counter sets the VIA t2 counter to the required value
+;; The loop_header macro is at the start of write or compare pass.
 ;;
-;; pass 1: ACR=&A0; t2_h=&FF; t2_l=&FF => Data unchanged
-;; pass 2: ACR=&60; t2_h=&00; t2_l=&FF => Data incremented by one
-;; pass 3: ACR=&00; t2_h= !X; t2_l=  X => Data randomly purturbed
+;; It sets the VIA t2 counter to the required value for that pass:
+;;    pass 1: ACR=&A0; t2_h=&FF; t2_l=&FF => Data unchanged
+;;    pass 2: ACR=&60; t2_h=&00; t2_l=&FF => Data incremented by one
+;;    pass 3: ACR=&00; t2_h= !X; t2_l=  X => Data randomly purturbed
 ;;
 ;; must exit with:
 ;;   A = test data/anchor/seed
@@ -161,8 +164,7 @@ MACRO loop_header
     LDY #&00
 ENDMACRO
 
-;; This macro handles looping back for the next column
-;;
+;; This loop_footer handles looping back for the next memory column
 ;;
 
 MACRO loop_footer loop_start
@@ -179,8 +181,8 @@ MACRO loop_footer loop_start
 ENDMACRO
 
 ;; The out_message macro writes a zero-terminated message directly
-;; to screen memory, translating the ASCII characters to 6847 character
-;; codes on the fly.
+;; to screen memory. The messages are stored using 6847 character
+;; codes rather than ASCII.
 
 MACRO out_message screen
     LDY #&00
@@ -245,6 +247,13 @@ MACRO out_hex_y screen
     out_hex_digit screen+1
 ENDMACRO
 
+;; The out_clear_screen macro is used to clear the screen
+;;
+;; The top/bottom parameters, together with the value of Y,
+;; control how much of the screen to clear.
+;;
+;; To clear the whole screen, top=TRUE, bottom=TRUE, Y=&00
+
 MACRO out_clear_screen top,bottom
     LDA #&20
 .loop
@@ -284,7 +293,7 @@ ENDMACRO
 
 .RST_HANDLER
 
-;; disable interrupts
+;; disable interrupts (only needed if invoked as a program)
     SEI
 
 ;; reset the stack pointer (even though it's not used, just in case)
@@ -306,7 +315,7 @@ ENDMACRO
     LDA #screen_init
     STA &B000
 
-    ;; In pass 1 the VIA T2 counter is set to pulse counting mode (VIA ACR=0x20)
+    ;; In pass 1 the VIA T2 counter is set to pulse counting mode (VIA ACR=0xA0)
     ;; so it doesn't change. The counter is preloaded with FFFF, which causes the test
     ;; data to remain fixed.
     ;;
@@ -330,7 +339,7 @@ ENDMACRO
 
     out_message_multiline row_title
 
-    ;; X is the loop iterator for the differnt fixed patterns
+    ;; X is the loop iterator for the different fixed patterns
     LDX #&00
 
 .test_loop2
@@ -364,8 +373,6 @@ NEXT
     ;; At the start of a compare pass, reset the VIA T2 counter to a deterministic state
     loop_header
 
-    ;; Now aligned to xxxA, so the branch within compare_data never crosses a page boundary
-
 .compare_loop
 
     ;; Cascade the compare_data macro N times, once per page being tested
@@ -391,8 +398,7 @@ NEXT
     JMP test_loop2
 
 .next_pass
-    ;; The ACR is used to distingish the pass
-    ;; (pass 1: ACR=0x60; pass 2: ACR=0x20: pass 3: ACR=0x00)
+    ;; The ACR is used to distingish the pass (as we have no RAM and no spare registers)
     LDY #(row_pass - screen_base)
     LDA via_acr
     CMP #acr_pass1

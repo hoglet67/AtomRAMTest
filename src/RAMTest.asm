@@ -131,13 +131,11 @@ ENDMACRO
 ;;   0A->0F => 01->06
 
 MACRO out_hex_digit screen
-      CMP #&0A
-      BCC digit09
-      SBC #&09
-      BNE digitAF
-.digit09
       ORA #&30
-.digitAF
+      CMP #&3A
+      BCC store
+      SBC #&39
+.store
       STA screen
 ENDMACRO
 

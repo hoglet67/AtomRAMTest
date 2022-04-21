@@ -31,11 +31,9 @@ via_t2_counter_l = via_base + &08
 via_t2_counter_h = via_base + &09
 via_acr          = via_base + &0B
 
-
+;; Screen addresses for particular messages
 row_title        = screen_base + &00
-row_testing      = screen_base + &40
-row_running      = screen_base + &80
-row_fixed        = screen_base + &C0
+row_pass         = screen_base + &C0
 row_data         = screen_base + &E0
 row_result       = screen_base + &120
 
@@ -125,6 +123,28 @@ MACRO out_message screen
 .done
 ENDMACRO
 
+;; A more complex version of out_message that deals with line breaks
+;; (which are encoded as characters with bit 7 set).
+
+MACRO out_message_multiline screen
+.loop
+      LDA messages, X
+      BEQ done
+      BMI newline
+      STA screen, Y
+      INY
+.next
+      INX
+      BNE loop
+.newline
+      TYA
+      ADC #&20
+      AND #&E0
+      TAY
+      BNE next
+.done
+ENDMACRO
+
 ;; The out_hex_digit macro writes a single hex digit in A (00-0F) to
 ;; screen memory, converting to 6847 character codes on the fly:
 ;;   00->09 => 30->39
@@ -206,19 +226,6 @@ ENDMACRO
     LDA #screen_init
     STA &B000
 
-;; Print the fixed messages
-
-    LDX #(msg_title - messages)
-    out_message row_title
-    INX
-    out_message row_testing
-    INX
-    out_message row_running
-    INX
-    out_message row_fixed
-    INX
-    out_message row_data
-
     ;; In pass 1 the VIA T2 counter is set to pulse counting mode
     ;; (VIA ACR=0x20) so it doesn't change, and then the counter is cleared.
     ;;
@@ -232,8 +239,13 @@ ENDMACRO
 
     LDA #&20
 
+    LDX #(msg_pass1 - messages)
+    LDY #(row_title - screen_base)
+
 .test_loop1
     STA via_acr
+
+    out_message_multiline row_title
 
     ;; X is the loop iterator for the differnt fixed patterns
     LDX #&00
@@ -321,14 +333,13 @@ NEXT
     AND #&20
     BEQ success
 
-    ;; Update the screen to show pass 2 (random data)
-    LDX #(msg_random - messages)
-    out_message row_fixed
-    INX
-    out_message row_data
-
     ;; A will be written to the ACR so VIA T2 is in free-running mode in pass 2
     LDA #&00
+
+    ;; Update the screen to show pass 2 (random data)
+    LDX #(msg_pass2 - messages)
+    LDY #(row_pass - screen_base)
+
     JMP test_loop1
 
 .success
@@ -380,11 +391,10 @@ MAPCHAR &40,&5F,&00
 
 .messages
 
-.msg_title
+.msg_pass1
     EQUS "ATOM RAM TEST"
-    EQUB 0
+    EQUB &80, &80
 
-.msg_testing
     EQUS "TESTING #"
     EQUS STR$~(page_start DIV &10 MOD &10)
     EQUS STR$~(page_start         MOD &10)
@@ -392,29 +402,25 @@ MAPCHAR &40,&5F,&00
     EQUS STR$~(page_end  DIV &10 MOD &10)
     EQUS STR$~(page_end          MOD &10)
     EQUS "FF"
-    EQUB 0
+    EQUB &80, &80
 
-.msg_running
     EQUS "RUNNING FROM #"
     EQUS STR$~(test_start DIV &1000 MOD &10)
     EQUS STR$~(test_start DIV &0100 MOD &10)
     EQUS STR$~(test_start DIV &0010 MOD &10)
     EQUS STR$~(test_start           MOD &10)
-    EQUB 0
+    EQUB &80, &80
 
-.msg_fixed
     EQUS "PASS 1: FIXED DATA"
-    EQUB 0
+    EQUB &80
 
-.msg_data
     EQUS "  DATA: "
     EQUB 0
 
-.msg_random
+.msg_pass2
     EQUS "PASS 2: RANDOM DATA"
-    EQUB 0
+    EQUB &80
 
-.msg_seed
     EQUS "  SEED: "
     EQUB 0
 

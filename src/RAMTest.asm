@@ -141,26 +141,33 @@ ENDMACRO
 ;; Currently alignment ends up at xxx9
 
 MACRO loop_header
-    ;; Pass 1 - VIA T2 = FF FF
-    LDY #&FF
-    TYA
     BIT via_acr
-    BMI store
     BVS pass2
-    ;; Pass 3 - VIA T2 = !X  X (i.e. try to randomize the counter start as well)
-    TXA
-    TAY
-    EOR #&FF
-    BNE store
+    BPL pass3
+.pass1
+    ;; Pass 1 - VIA T2 = FF FF ; A = pattern
+    LDY #&FF
+    STY via_t2_counter_l
+    BNE pattern
 .pass2
-    ;; Pass 2 - VIA T2 = 00 FF
+    ;; Pass 2 - VIA T2 = 00 FF ; A = FF
+    LDY #&FF
+    STY via_t2_counter_l
+    TYA
     INY
+    BEQ store
+.pass3
+    ;; Pass 3 - VIA T2 = !X  X ; A = pattern
+    STX via_t2_counter_l
+    TXA
+    EOR #&FF
+    TAY
+.pattern
+    LDA pattern_list, X
 .store
     make_aligned
     SEC
-    STA via_t2_counter_l
     STY via_t2_counter_h
-    LDA pattern_list, X
     LDY #&00
 ENDMACRO
 
@@ -171,7 +178,9 @@ MACRO loop_footer loop_start
     make_aligned
     BIT via_acr             ;; Bit 7 of the ACR set indicates pass 1
     BMI skip_correction     ;; Pass 2/3 correct test data at end of each col
-    SBC #(page_end - page_start + 1)
+    SBC #(page_end - page_start + 2)
+    CLC
+    ADC increment_list, X
     SEC
 .skip_correction
     INY
@@ -346,6 +355,10 @@ ENDMACRO
 
     ;; Output the current pattern to the right place on the screen
     LDA pattern_list, X
+    BIT via_acr
+    BVC not_pass2
+    LDA increment_list, X
+.not_pass2
     TAY
     out_hex_y row_data+&08
 
@@ -354,15 +367,15 @@ ENDMACRO
 
 .write_loop
 
+    ;; First write sample to the bottom half of the screen to keep it interesting!
+    write_data &8100
+
     ;; Cascade the write_data macro N times, once per page being tested
     ;; A = test data value
     ;; Y = index within the page
 FOR page, page_start, page_end
     write_data page * &100
 NEXT
-
-    ;; Also write to the bottom half of the screen to keep it interesting!
-    write_data &8100
 
     ;; Loop back for the next index (Y) within the page. 16-byte alignment is
     ;; important here to avoid the done branch crossing a page)
@@ -375,15 +388,15 @@ NEXT
 
 .compare_loop
 
+    ;; First compare sample in bottom half of the screen
+    compare_data &8100
+
     ;; Cascade the compare_data macro N times, once per page being tested
     ;; A = reference data value
     ;; Y = index within the page
 FOR page, page_start, page_end
     compare_data page * &100
 NEXT
-
-    ;; Also compare bottom half of the screen
-    compare_data &8100
 
     ;; Loop back for the next index (Y) within the page. 16-byte alignment is
     ;; important here to avoid the done branch crossing a page)
@@ -506,7 +519,7 @@ MAPCHAR &40,&5F,&00
     EQUS "PASS 2: ADDRESS DATA"
     EQUB &80
 
-    EQUS "ANCHOR: "
+    EQUS "  SKEW: "
     EQUB 0
 
 .msg_pass3
@@ -531,6 +544,34 @@ MAPCHAR &40,&5F,&00
 .msg_nmi
     EQUS "NMI!!"
     EQUB 0
+
+
+;; ******************************************************************
+;; Increment data
+;; ******************************************************************
+
+.increment_list
+    EQUB &00
+    EQUB &01
+    EQUB &02
+    EQUB &03
+    EQUB &04
+    EQUB &05
+    EQUB &06
+    EQUB &07
+    EQUB &08
+    EQUB &09
+    EQUB &0A
+    EQUB &0B
+    EQUB &0C
+    EQUB &0D
+    EQUB &0E
+    EQUB &0F
+    EQUB &10
+    EQUB &11
+    EQUB &12
+    EQUB &13
+
 
 ;; ******************************************************************
 ;; Pattern data

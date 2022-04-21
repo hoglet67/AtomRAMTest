@@ -37,6 +37,11 @@ row_pass         = screen_base + &C0
 row_data         = screen_base + &E0
 row_result       = screen_base + &120
 
+;; ACR values for each pass
+acr_pass1        = &20
+acr_pass2        = &60
+acr_pass3        = &00
+
 ;; ******************************************************************
 ;; Macros
 ;; ******************************************************************
@@ -44,10 +49,13 @@ row_result       = screen_base + &120
 ;; The write_data macro writes a byte of data (in A) to an offset in
 ;; a memory page, using Y as the index within the page.
 ;;
-;; In the first pass of the test, the VIA T2 counter is forced to zero,
+;; In the first pass of the test, the VIA T2 counter is forced to FFFF,
 ;; so the value in A is written directly.
 ;;
-;; In the second pass of the test, the VIA T2 counter is free-running,
+;; In the second pass of the test, the VIA T2 counter is forced to 00FF,
+;; so the value in A is incremented by 1 each time.
+;;
+;; In the third pass of the test, the VIA T2 counter is free-running,
 ;; so the value in A is perturbed by ADCing with the current counter
 ;; value, which gives a pseudo-random(ish) stream of data.
 ;;
@@ -72,7 +80,7 @@ ENDMACRO
 ;;
 ;; This macro mirrors the read_data macro
 ;;
-;; In the second pass, it's critical that the VIA T2 counter values
+;; In the final pass, it's critical that the VIA T2 counter values
 ;; exactly match those used when the data was written. This means the
 ;; macro must also take exactly 11 cycles. As it contains a forward
 ;; branch instruction, this must never cross a page boundary. The
@@ -86,17 +94,20 @@ ENDMACRO
 ;; does not cross a page boundary.
 ;;
 ;; If aligned to xxxA then the branch will neve cross a page boundary
-
+;;
 ;; Entered with C=1, exits with C=1
-
+;;
+;; (1) and (2) must be in the same page to avoid page crossing penatly
+;; => macro must be aligned to xxx5 -> xxxF
+;;
 MACRO compare_data address
-    ADC via_t2_counter_l ; 4 +FA - pass 1: T2-L loaded with FF, so A unchanged
-    ADC via_t2_counter_h ; 4 +FD - pass 2: T2-L loaded with FF, so A unchanged
-    CMP address, Y       ; 4 +00
-    BEQ next             ; 3 +03 ;; C=1 if branch taken
-    LDA #>address        ;   +05
-    JMP fail             ;   +07
-.next
+    ADC via_t2_counter_l ; 4 +00 - pass 1: T2-L loaded with FF, so A unchanged
+    ADC via_t2_counter_h ; 4 +03 - pass 2: T2-L loaded with FF, so A unchanged
+    CMP address, Y       ; 4 +06
+    BEQ next             ; 3 +09 - C=1 if branch taken
+    LDA #>address        ;   +0B (1)
+    JMP fail             ;   +0D
+.next                    ;   +10 (2)
 ENDMACRO
 
 ;; The make_aligned macro forces the next instruction to be 16-byte aligned
@@ -105,6 +116,53 @@ MACRO make_aligned
     JMP align
     ALIGN 16
 .align
+ENDMACRO
+
+;; The initialize_t2_counter sets the VIA t2 counter to the required value
+;;
+;; pass 1: ACR=&20; t2_l=FF; t2h_FF
+;; pass 2: ACR=&60; t2_l=FF; t2h_00
+;; pass 3: ACR=&00; t2_l=FF; t2h_FF
+;;
+;; must exit with:
+;;   A = pattern
+;;   X = unchanged (it's the patten loop counter)
+;;   Y = 00
+;;   C = 1
+;;
+;; Alignment must end up between xxx5 and xxxF to avoid page crossing in write_data
+;;
+;; Currently alignment ends up at xxx9
+
+MACRO loop_header
+    LDY #&FF
+    STY via_t2_counter_l
+    BIT via_acr             ;; Bit 6 of the ACR set indicates pass 2
+    BVC store
+    INY                     ;; pass 2 increment t2l from FF to 00
+.store
+    make_aligned
+    SEC
+    LDA pattern_list, X
+    STY via_t2_counter_h
+    LDY #&00
+ENDMACRO
+
+;; This macro handles looping backfor the next colum
+;;
+;;
+
+MACRO loop_footer loop_start
+    make_aligned
+    BIT via_acr
+    BVC skip_correction
+    SBC #(page_end - page_start)
+    SEC
+.skip_correction
+    INY
+    BEQ loop_exit
+    JMP loop_start
+.loop_exit
 ENDMACRO
 
 ;; The out_message macro writes a zero-terminated message directly
@@ -226,19 +284,22 @@ ENDMACRO
     LDA #screen_init
     STA &B000
 
-    ;; In pass 1 the VIA T2 counter is set to pulse counting mode
-    ;; (VIA ACR=0x20) so it doesn't change, and then the counter is cleared.
+    ;; In pass 1 the VIA T2 counter is set to pulse counting mode (VIA ACR=0x20)
+    ;; so it doesn't change. The counter is preloaded with FFFF, which causes the test
+    ;; data to remain fixed.
     ;;
-    ;; In pass 2 the VIA T2 counter is set to free running counter mode
-    ;; (VIA ACR=0x00) so it decrements at 1MHz.
+    ;; In pass 2 the VIA T2 counter is set to pulse counting mode (VIA ACR=0x60)
+    ;; so it doesn't change. The counter is preloaded with 00FF, which causes the test
+    ;; data to increment by one each row (page).
     ;;
-    ;; This causes the test data in pass 2 to be psuedo-random(ish)
+    ;; In pass 3 the VIA T2 counter is set to free running counter mode (VIA ACR=0x00)
+    ;; so it decrements at 1MHz. The counter is preloaded with FFFF, which causes the test data
+    ;; to be psuedo-random(ish)
     ;;
-    ;; The ACR is also in effect tracking whether we are in pass 1 or 2
+    ;; The ACR is also in effect tracking whether we are in pass 1, 2 or 3
     ;; (as we don't want to assume any RAM is useable).
 
-    LDA #&20
-
+    LDA #acr_pass1
     LDX #(msg_pass1 - messages)
     LDY #(row_title - screen_base)
 
@@ -257,15 +318,8 @@ ENDMACRO
     TAY
     out_hex_y row_data+&08
 
-    ;; The write_data macro requires the write data to be in A
-    LDA pattern_list, X
-
     ;; At the start of a write pass, reset the VIA T2 counter to a deterministic state
-    SEC
-    LDY #&FF
-    STY via_t2_counter_l
-    STY via_t2_counter_h
-    INY
+    loop_header
 
 .write_loop
 
@@ -278,26 +332,12 @@ NEXT
 
     ;; Loop back for the next index (Y) within the page. 16-byte alignment is
     ;; important here to avoid the done branch crossing a page)
-    make_aligned
-    INY
-    BEQ write_done
-    JMP write_loop
-.write_done
-
-    ;; The compare_data macro requires the data to be checked to be in A
-    LDA pattern_list, X
+    loop_footer write_loop
 
     ;; We are now ready to read back and compare the written data...
 
-    ;; Make sure we start 16-byte aligned (xxx0)
-    make_aligned
-
     ;; At the start of a compare pass, reset the VIA T2 counter to a deterministic state
-    SEC
-    LDY #&FF
-    STY via_t2_counter_l
-    STY via_t2_counter_h
-    INY
+    loop_header
 
     ;; Now aligned to xxxA, so the branch within compare_data never crosses a page boundary
 
@@ -312,40 +352,42 @@ NEXT
 
     ;; Loop back for the next index (Y) within the page. 16-byte alignment is
     ;; important here to avoid the done branch crossing a page)
-    make_aligned
-    INY
-    BEQ compare_done
-    JMP compare_loop
-.compare_done
+    loop_footer compare_loop
 
     ;; All the time critical stuff is over now
 
     ;; Move on to the next pattern
     INX
     CPX #pattern_list_end - pattern_list
-    BEQ pass2
+    BEQ next_pass
     JMP test_loop2
 
-.pass2
-    ;; The ACR (bit 5) is used to distingish pass 1 from pass 2
-    ;; (pass 1: ACR=0x20; pass 2: ACR=0x00)
-    LDA via_acr
-    AND #&20
-    BEQ success
-
-    ;; A will be written to the ACR so VIA T2 is in free-running mode in pass 2
-    LDA #&00
-
-    ;; Update the screen to show pass 2 (random data)
-    LDX #(msg_pass2 - messages)
+.next_pass
+    ;; The ACR is used to distingish the pass
+    ;; (pass 1: ACR=0x60; pass 2: ACR=0x20: pass 3: ACR=0x00)
     LDY #(row_pass - screen_base)
-
-    JMP test_loop1
+    LDA via_acr
+    CMP #acr_pass1
+    BEQ pass2
+    CMP #acr_pass2
+    BEQ pass3
 
 .success
     ;; Yeeehhh! All the tests have passed
     LDX #(msg_passed - messages)
     BNE halt_message
+
+.pass2
+    ;; Get setup for pass 2
+    LDA #acr_pass2
+    LDX #(msg_pass2 - messages)
+    JMP test_loop1
+
+.pass3
+    ;; Get setup for pass 3
+    LDA #acr_pass3
+    LDX #(msg_pass3 - messages)
+    JMP test_loop1
 
 .fail
     ;; Boooh! One of the tests has failed, at this point the compare_data macro has set:
@@ -418,7 +460,14 @@ MAPCHAR &40,&5F,&00
     EQUB 0
 
 .msg_pass2
-    EQUS "PASS 2: RANDOM DATA"
+    EQUS "PASS 2: ADDRESS DATA"
+    EQUB &80
+
+    EQUS "ANCHOR: "
+    EQUB 0
+
+.msg_pass3
+    EQUS "PASS 3: RANDOM DATA "
     EQUB &80
 
     EQUS "  SEED: "

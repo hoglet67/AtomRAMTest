@@ -33,9 +33,9 @@ via_acr          = via_base + &0B
 
 ;; Screen addresses for particular messages
 row_title        = screen_base + &00
-row_pass         = screen_base + &C0
-row_data         = screen_base + &E0
-row_result       = screen_base + &120
+row_pass         = screen_base + &A0
+row_data         = screen_base + &C0
+row_result       = screen_base + &100
 
 ;; ACR values for each pass
 acr_pass1        = &20
@@ -156,7 +156,7 @@ MACRO loop_footer loop_start
     make_aligned
     BIT via_acr
     BVC skip_correction
-    SBC #(page_end - page_start)
+    SBC #(page_end - page_start + 1)
     SEC
 .skip_correction
     INY
@@ -232,6 +232,19 @@ MACRO out_hex_y screen
     out_hex_digit screen+1
 ENDMACRO
 
+MACRO out_clear_screen top,bottom
+    LDA #&20
+.loop
+IF (top)
+    STA screen_base, Y
+ENDIF
+IF (bottom)
+    STA screen_base + &100, Y
+ENDIF
+    INY
+    BNE loop
+ENDMACRO
+
 ;; ******************************************************************
 ;; Atom ATM file Header
 ;; ******************************************************************
@@ -269,12 +282,8 @@ ENDMACRO
 
 ;; Clear the screen
 
-    LDA #&20
-.clear_loop
-    STA screen_base, X
-    STA screen_base + &100, X
-    INX
-    BNE clear_loop
+    LDY #&00
+    out_clear_screen TRUE, TRUE
 
 ;; initialize the Atom 8255 PIA (exactly as the Atom Reset handler would)
     LDA #&8A
@@ -330,6 +339,9 @@ FOR page, page_start, page_end
     write_data page * &100
 NEXT
 
+    ;; Also write to the bottom half of the screen to keep it interesting!
+    write_data &8100
+
     ;; Loop back for the next index (Y) within the page. 16-byte alignment is
     ;; important here to avoid the done branch crossing a page)
     loop_footer write_loop
@@ -349,6 +361,9 @@ NEXT
 FOR page, page_start, page_end
     compare_data page * &100
 NEXT
+
+    ;; Also compare bottom half of the screen
+    compare_data &8100
 
     ;; Loop back for the next index (Y) within the page. 16-byte alignment is
     ;; important here to avoid the done branch crossing a page)
@@ -403,9 +418,18 @@ NEXT
     out_hex_y row_result+&0A
 
     LDX #(msg_failed - messages)
-    ;; Fall through to...
+    LDY #&0E
+
+    ;; BIT <absolute> to skip the next instruction
+    EQUB &2C
 
 .halt_message
+    ;; This is skipped in the failure case, preserving the failure address
+    LDY #&00
+
+    ;; Clear the bottom of the screen
+    out_clear_screen FALSE, TRUE
+
     ;; Output final message
     out_message row_result
 
@@ -444,9 +468,9 @@ MAPCHAR &40,&5F,&00
     EQUS STR$~(page_end  DIV &10 MOD &10)
     EQUS STR$~(page_end          MOD &10)
     EQUS "FF"
-    EQUB &80, &80
+    EQUB &80
 
-    EQUS "RUNNING FROM #"
+    EQUS "RUNNING #"
     EQUS STR$~(test_start DIV &1000 MOD &10)
     EQUS STR$~(test_start DIV &0100 MOD &10)
     EQUS STR$~(test_start DIV &0010 MOD &10)

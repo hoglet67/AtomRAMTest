@@ -38,7 +38,10 @@ row_data         = screen_base + &C0
 row_result       = screen_base + &100
 
 ;; ACR values for each pass
-acr_pass1        = &20
+;;
+;; (bit 7 set indicates pass 1)
+;; (bit 6 set indicates pass 2)
+acr_pass1        = &A0
 acr_pass2        = &60
 acr_pass3        = &00
 
@@ -120,7 +123,7 @@ ENDMACRO
 
 ;; The initialize_t2_counter sets the VIA t2 counter to the required value
 ;;
-;; pass 1: ACR=&20; t2_l=FF; t2h_FF
+;; pass 1: ACR=&A0; t2_l=FF; t2h_FF
 ;; pass 2: ACR=&60; t2_l=FF; t2h_00
 ;; pass 3: ACR=&00; t2_l=FF; t2h_FF
 ;;
@@ -138,8 +141,8 @@ MACRO loop_header
     LDY #&FF
     STY via_t2_counter_l
     BIT via_acr             ;; Bit 6 of the ACR set indicates pass 2
-    BVC store
-    INY                     ;; pass 2 increment t2l from FF to 00
+    BVC store               ;; Pass 2 increment t2l from FF to 00
+    INY
 .store
     make_aligned
     SEC
@@ -148,14 +151,14 @@ MACRO loop_header
     LDY #&00
 ENDMACRO
 
-;; This macro handles looping backfor the next colum
+;; This macro handles looping back for the next column
 ;;
 ;;
 
 MACRO loop_footer loop_start
     make_aligned
-    BIT via_acr
-    BVC skip_correction
+    BIT via_acr             ;; Bit 7 of the ACR set indicates pass 1
+    BMI skip_correction     ;; Pass 2/3 correct test data at end of each col
     SBC #(page_end - page_start + 1)
     SEC
 .skip_correction

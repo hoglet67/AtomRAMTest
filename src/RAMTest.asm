@@ -511,14 +511,14 @@ MAPCHAR &40,&5F,&00
     EQUB 0
 
 .msg_pass2
-    EQUS "PASS 2: ADDRESS DATA"
+    EQUS "PASS 2: INCREMENTING DATA"
     EQUB &80
 
     EQUS "  SKEW: "
     EQUB 0
 
 .msg_pass3
-    EQUS "PASS 3: RANDOM DATA "
+    EQUS "PASS 3: PSEUDO-RANDOM DATA"
     EQUB &80
 
     EQUS "  SEED: "

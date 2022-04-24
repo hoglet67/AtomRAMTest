@@ -252,15 +252,17 @@ ENDMACRO
 ;; screen memory, using the above out_hex_digit for each nibble.
 
 macro out_hex_a screen
-    STA screen      ;; Use screen as a temporary value
-    AND #&0F
-    out_hex_digit screen+1
-    LDA screen
+    TXS
+    TAX
     LSR A
     LSR A
     LSR A
     LSR A
     out_hex_digit screen
+    TXA
+    AND #&0F
+    out_hex_digit screen+1
+    TSX
 ENDMACRO
 
 ;; The out_clear_screen macro is used to clear the screen

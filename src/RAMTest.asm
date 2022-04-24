@@ -189,7 +189,10 @@ MACRO out_message screen
 .loop
     LDA messages, X
     BEQ done
+    CMP #'?'
+    BEQ skip
     STA screen, Y
+.skip
     INX
     INY
     BNE loop
@@ -456,7 +459,7 @@ NEXT
     ;; Y = low  byte of failed address
 
     ;; 0123456789abcdef0123456789abcdef
-    ;; FAILED AT XXXX W:XX R:XX
+    ;; FAILED AT ???? W:?? R:??
     out_hex_a row_result+&11
     TXA
     out_hex_a row_result+&0A
@@ -478,36 +481,21 @@ NEXT
 
     ;; Execute it
     JMP row_result
+
+    ;; And output the value read
 .continue
     out_hex_a row_result+&16
 
-    ;; Fill in some remainig fixed parts around the values just written
-    LDA #' '
-    STA row_result+&0E
-    STA row_result+&13
-    LDA #':'
-    STA row_result+&10
-    STA row_result+&15
-    LDA #'W' - &40
-    STA row_result+&0F
-    LDA #'R' - &40
-    STA row_result+&14
-
     LDX #(msg_failed - messages)
-    LDY #&18
-
-    ;; BIT <absolute> to skip the next instruction
-    EQUB &2C
+    ;; fall through to
 
 .halt_message
-    ;; This is skipped in the failure case, preserving the failure address
-    LDY #&00
-
-    ;; Clear the bottom of the screen
-    out_clear_screen FALSE, TRUE
 
     ;; Output final message
     out_message row_result
+
+    ;; Clear the bottom of the screen
+    out_clear_screen FALSE, TRUE
 
 .halt
     ;; Loop forever....
@@ -578,7 +566,7 @@ MAPCHAR &40,&5F,&00
     EQUB 0
 
 .msg_failed
-    EQUS "FAILED AT "
+    EQUS "FAILED AT ???? W:?? R:??"
     EQUB 0
 
 .msg_irq

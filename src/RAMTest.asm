@@ -110,7 +110,7 @@ MACRO compare_data address
     ADC via_t2_counter_h ; 4 +03 - pass 2: T2-L loaded with FF, so A unchanged
     CMP address, Y       ; 4 +06
     BEQ next             ; 3 +09 - C=1 if branch taken
-    LDA #>address        ;   +0B (1)
+    LDX #>address        ;   +0B (1)
     JMP fail             ;   +0D
 .next                    ;   +10 (2)
 ENDMACRO
@@ -245,6 +245,22 @@ MACRO out_hex_y screen
     TYA
     AND #&0F
     out_hex_digit screen+1
+ENDMACRO
+
+
+;; The out_hex_a macro writes two hex digits in A (00-FF) to
+;; screen memory, using the above out_hex_digit for each nibble.
+
+macro out_hex_a screen
+    STA screen      ;; Use screen as a temporary value
+    AND #&0F
+    out_hex_digit screen+1
+    LDA screen
+    LSR A
+    LSR A
+    LSR A
+    LSR A
+    out_hex_digit screen
 ENDMACRO
 
 ;; The out_clear_screen macro is used to clear the screen
@@ -417,7 +433,7 @@ NEXT
 .success
     ;; Yeeehhh! All the tests have passed
     LDX #(msg_passed - messages)
-    BNE halt_message
+    JMP halt_message
 
 .pass2
     ;; Get setup for pass 2
@@ -433,19 +449,50 @@ NEXT
 
 .fail
     ;; Boooh! One of the tests has failed, at this point the compare_data macro has set:
-    ;; A = high byte of failed address
+    ;; A = reference value
+    ;; X = high byte of failed address
     ;; Y = low  byte of failed address
 
     ;; 0123456789abcdef0123456789abcdef
-    ;; FAILED AT AAYY
-    TAX
-    out_hex_y row_result+&0C
+    ;; FAILED AT XXXX W:XX R:XX
+    out_hex_a row_result+&11
     TXA
-    TAY
-    out_hex_y row_result+&0A
+    out_hex_a row_result+&0A
+    TYA
+    out_hex_a row_result+&0C
+
+    ;; Write some self-modifying code into the screen
+    ;; LDA XXYY; JMP continue
+    LDA #&AD
+    STA row_result
+    STY row_result+1
+    STX row_result+2
+    LDA #&4C
+    STA row_result+3
+    LDA #<continue
+    STA row_result+4
+    LDA #>continue
+    STA row_result+5
+
+    ;; Execute it
+    JMP row_result
+.continue
+    out_hex_a row_result+&16
+
+    ;; Fill in some remainig fixed parts around the values just written
+    LDA #' '
+    STA row_result+&0E
+    STA row_result+&13
+    LDA #':'
+    STA row_result+&10
+    STA row_result+&15
+    LDA #'W' - &40
+    STA row_result+&0F
+    LDA #'R' - &40
+    STA row_result+&14
 
     LDX #(msg_failed - messages)
-    LDY #&0E
+    LDY #&18
 
     ;; BIT <absolute> to skip the next instruction
     EQUB &2C

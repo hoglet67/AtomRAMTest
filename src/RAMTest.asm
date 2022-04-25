@@ -64,20 +64,19 @@ acr_pass3        = &00
 ;; so the value in A is perturbed by ADCing with the current counter
 ;; value, which gives a pseudo-random(ish) stream of data.
 ;;
-;; This macro is 10 bytes and is cascaded 128 times (once for each page
+;; This macro is 7 bytes and is cascaded 128 times (once for each page
 ;; begin tested) which adds up to 1280 bytes.
 ;;
-;; This macro takes 15 cycles, regardless of alignment.
+;; This macro takes 11 cycles, regardless of alignment.
 ;;
 ;; (15 is not a power of 2, which helps avoid obvious repeating patterns)
 
 ;; Entered with C=1, exits with C=1
 
-MACRO write_data address
-    ADC via_t2_counter_l ; 4 - pass 1: T2-L loaded with FF, so A unchanged
-    ADC via_t2_counter_h ; 4 - pass 1: T2-H loaded with FF, so A unchanged
-    STA address, Y       ; 5
-    SEC                  ; 2
+MACRO write_data page
+    ADC via_t2_counter_l + (page AND 1) ; 4 - pass 1: T2-L/H loaded with FF, so A unchanged
+    STA page * &100, Y                  ; 5
+    SEC                                 ; 2
 ENDMACRO
 
 ;; The compare_data macro compares the data in a memory page to a reference
@@ -95,24 +94,24 @@ ENDMACRO
 ;; This macro is 16 bytes and is cascaded 128 times (once for each page
 ;; begin tested) which adds up to 2048 bytes.
 ;;
-;; This macro takes 15 cycles, in the happy case, and if the bramch
+;; This macro takes 11 cycles, in the happy case, and if the bramch
 ;; does not cross a page boundary.
-;;
-;; If aligned to xxxA then the branch will neve cross a page boundary
 ;;
 ;; Entered with C=1, exits with C=1
 ;;
 ;; (1) and (2) must be in the same page to avoid page crossing penatly
-;; => macro must be aligned to xxx5 -> xxxF
+;; => macro must be aligned to xxx8 -> xxxF
 ;;
-MACRO compare_data address
-    ADC via_t2_counter_l ; 4 +00 - pass 1: T2-L loaded with FF, so A unchanged
-    ADC via_t2_counter_h ; 4 +03 - pass 2: T2-L loaded with FF, so A unchanged
-    CMP address, Y       ; 4 +06
-    BEQ next             ; 3 +09 - C=1 if branch taken
-    LDX #>address        ;   +0B (1)
-    JMP fail             ;   +0D
-.next                    ;   +10 (2)
+MACRO compare_data page
+    ADC via_t2_counter_l + (page AND 1) ; 4 +00 - pass 1: T2-L/H loaded with FF, so A unchanged
+    CMP page * &100, Y                  ; 4 +03
+    BEQ next                            ; 3 +06 - C=1 if branch taken
+    LDX #page                           ;   +08 (1)
+    JMP fail                            ;   +0A
+    NOP                                 ;   +0D
+    NOP                                 ;   +0E
+    NOP                                 ;   +0D
+.next                                   ;   +10 (2)
 ENDMACRO
 
 ;; The make_aligned macro forces the next instruction to be 16-byte aligned
@@ -136,24 +135,24 @@ ENDMACRO
 ;;   Y = 00
 ;;   C = 1
 ;;
-;; Alignment must end up between xxx5 and xxxF to avoid page crossing in write_data
+;; Alignment must end up between xxx8 and xxxF to avoid page crossing in write_data
 ;;
-;; Currently alignment ends up at xxx6
+;; Currently alignment ends up at xxx9
 
 MACRO loop_header
     ;; Pass 1 - VIA T2 = FF FF ; A = pattern
     ;; Pass 3 - VIA T2 = FF FF ; A = pattern
     LDY #&FF
-    STY via_t2_counter_l
     LDA pattern_list, X
     BIT via_acr
     BVC store
-    ;; Pass 2 - VIA T2 = 00 FF ; A = FF
+    ;; Pass 2 - VIA T2 = 00 00 ; A = FF
     TYA
     INY
 .store
     make_aligned
     SEC
+    STY via_t2_counter_l
     STY via_t2_counter_h
     LDY #&00
 ENDMACRO
@@ -381,14 +380,14 @@ ENDMACRO
 
     ;; First write sample to the bottom half of the screen to keep it interesting!
 IF (screen_base = &8000)
-    write_data &8100
+    write_data &81
 ENDIF
 
     ;; Cascade the write_data macro N times, once per page being tested
     ;; A = test data value
     ;; Y = index within the page
 FOR page, page_start, page_end
-    write_data page * &100
+    write_data page
 NEXT
 
     ;; Loop back for the next index (Y) within the page. 16-byte alignment is
@@ -404,14 +403,14 @@ NEXT
 
     ;; First compare sample in bottom half of the screen
 IF (screen_base = &8000)
-    compare_data &8100
+    compare_data &81
 ENDIF
 
     ;; Cascade the compare_data macro N times, once per page being tested
     ;; A = reference data value
     ;; Y = index within the page
 FOR page, page_start, page_end
-    compare_data page * &100
+    compare_data page
 NEXT
 
     ;; Loop back for the next index (Y) within the page. 16-byte alignment is

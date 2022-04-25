@@ -103,18 +103,23 @@ ENDMACRO
 ;; Entered with C=1, exits with C=1
 ;;
 ;; (1) and (2) must be in the same page to avoid page crossing penatly
-;; => macro must be aligned to xxx9 -> xxx1
+;; => macro must be aligned to xxx6 -> xxx0
 ;;
 MACRO compare_data page
     ADC via_t2_counter_l + (page AND 1) ; 4 +00 - pass 1: T2-L/H loaded with FF, so A unchanged
-    TAX                                 ; 2 +03 - save the reference value
-    EOR page * &100, Y                  ; 4 +04 - use EOR rather than CMP so we have a record of the error
-    BEQ next                            ; 3 +07
-    LDY #page                           ;   +09 - (1)
-    JMP fail                            ;   +0B
-.next                                   ;
-    SEC                                 ; 2 +0E - (2)
-    TXA                                 ; 2 +0F - restore the reference value
+    SEC                                 ; 2 +03
+    TAX                                 ; 2 +04 - save the reference value
+    EOR page * &100, Y                  ; 4 +05 - use EOR rather than CMP so we have a record of the error
+    BEQ next                            ; 3 +08
+    TXS                                 ;   +0A - (1)
+    LDX #page                           ;   +0B
+IF page = page_end
+    BCS fail
+ELSE
+    BCS P%+16                           ;   +0D
+ENDIF
+.next                                   ;   +0D
+    TXA                            ; 8A ; 2 +0F - (2) restore the reference value
 ENDMACRO
 
 ;; The make_aligned macro forces the next instruction to be 16-byte aligned
@@ -138,9 +143,9 @@ ENDMACRO
 ;;   Y = 00
 ;;   C = 1
 ;;
-;; Alignment must end up between xxx9 and xxx1 to avoid page crossing in write_data
+;; Alignment must end up between xxx6 and xxx0 to avoid page crossing in write_data
 ;;
-;; Currently alignment ends up at xxxD
+;; Currently alignment ends up at xxxB
 
 MACRO loop_header
     ;; Pass 1 - VIA T2 = FF FF ; A = pattern
@@ -159,7 +164,6 @@ MACRO loop_header
     STY via_t2_counter_l
     STY via_t2_counter_h
     LDY #&00
-    STY via_tmp1
 ENDMACRO
 
 ;; This loop_footer handles looping back for the next memory column
@@ -180,7 +184,6 @@ ENDIF
     SEC
 .skip_correction
     INY
-    STY via_tmp1
     BEQ loop_exit
     JMP loop_start
 .loop_exit
@@ -312,9 +315,9 @@ MACRO re_read_failed
     ;; LDA XXYY; JMP continue
     LDA #&AD
     STA row_result
-    LDA via_tmp1
-    STA row_result+1
     LDA via_tmp2
+    STA row_result+1
+    LDA via_tmp1
     STA row_result+2
     LDA #&4C
     STA row_result+3
@@ -489,32 +492,35 @@ NEXT
 .fail
     ;; Boooh! One of the tests has failed, at this point the compare_data macro has set:
     ;;        A = error value (value read EOR value written)
-    ;;        X = reference value (written to memory)
-    ;;        Y = high byte of failed address
-    ;; via_tmp1 = low  byte of failed address
+    ;;        X = high byte of failed address
+    ;;        Y = low  byte of failed address
+    ;;        S = reference value (written to memory)
+    ;; via_tmp1 = spage
     ;; via_tmp2 = spare
 
     ;; 0123456789abcdef0123456789abcdef
     ;; FAILED AT ???? W:?? R:??
-    STA via_tmp2
+    STX via_tmp1      ;; via_tmp1 = MSB of address
+    STA via_tmp2      ;; via_tmp2 = error
+
+    ;; Reference value
+    TSX
+    TXA               ;; X = reference value
+    out_hex_a row_result+&11
 
     ;; High byte of address
-    TYA
+    LDA via_tmp1
     out_hex_a row_result+&0A
 
     ;; Low byta of address
-    LDA via_tmp1
+    TYA
     out_hex_a row_result+&0C
-
-    ;; Reference value
-    TXA
-    out_hex_a row_result+&11
 
     ;; read value
     TXA
     EOR via_tmp2
 
-    STY via_tmp2
+    STY via_tmp2    ;; via_tmp2 = LSB of address
     ;;        A = hold value read from memory
     ;;        X = spare
     ;;        Y = spare

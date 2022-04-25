@@ -27,6 +27,8 @@ screen_init      =? &00
 
 ;; The Atom's VIA T2 counter is used as a source of pseudo-random(ish) data.
 via_base         = &B800
+via_tmp1         = via_base + &06
+via_tmp2         = via_base + &07
 via_t2_counter_l = via_base + &08
 via_t2_counter_h = via_base + &09
 
@@ -64,18 +66,19 @@ acr_pass3        = &00
 ;; so the value in A is perturbed by ADCing with the current counter
 ;; value, which gives a pseudo-random(ish) stream of data.
 ;;
-;; This macro is 7 bytes and is cascaded 128 times (once for each page
-;; begin tested) which adds up to 1280 bytes.
+;; This macro is 9 bytes and is cascaded 128 times (once for each page
+;; begin tested) which adds up to 1152 bytes.
 ;;
-;; This macro takes 11 cycles, regardless of alignment.
+;; This macro takes 17 cycles, regardless of alignment.
 ;;
-;; (15 is not a power of 2, which helps avoid obvious repeating patterns)
+;; (17 is not a power of 2, which helps avoid obvious repeating patterns)
 
 ;; Entered with C=1, exits with C=1
 
 MACRO write_data page
     ADC via_t2_counter_l + (page AND 1) ; 4 - pass 1: T2-L/H loaded with FF, so A unchanged
     STA page * &100, Y                  ; 5
+    CMP (0, X)                          ; 6 - waste 6 cycles with a few bytes as possible
     SEC                                 ; 2
 ENDMACRO
 
@@ -94,24 +97,24 @@ ENDMACRO
 ;; This macro is 16 bytes and is cascaded 128 times (once for each page
 ;; begin tested) which adds up to 2048 bytes.
 ;;
-;; This macro takes 11 cycles, in the happy case, and if the bramch
+;; This macro takes 17 cycles, in the happy case, and if the branch
 ;; does not cross a page boundary.
 ;;
 ;; Entered with C=1, exits with C=1
 ;;
 ;; (1) and (2) must be in the same page to avoid page crossing penatly
-;; => macro must be aligned to xxx8 -> xxxF
+;; => macro must be aligned to xxx9 -> xxx1
 ;;
 MACRO compare_data page
     ADC via_t2_counter_l + (page AND 1) ; 4 +00 - pass 1: T2-L/H loaded with FF, so A unchanged
-    CMP page * &100, Y                  ; 4 +03
-    BEQ next                            ; 3 +06 - C=1 if branch taken
-    LDX #page                           ;   +08 (1)
-    JMP fail                            ;   +0A
-    NOP                                 ;   +0D
-    NOP                                 ;   +0E
-    NOP                                 ;   +0D
-.next                                   ;   +10 (2)
+    TAX                                 ; 2 +03 - save the reference value
+    EOR page * &100, Y                  ; 4 +04 - use EOR rather than CMP so we have a record of the error
+    BEQ next                            ; 3 +07
+    LDY #page                           ;   +09 - (1)
+    JMP fail                            ;   +0B
+.next                                   ;
+    SEC                                 ; 2 +0E - (2)
+    TXA                                 ; 2 +0F - restore the reference value
 ENDMACRO
 
 ;; The make_aligned macro forces the next instruction to be 16-byte aligned
@@ -135,9 +138,9 @@ ENDMACRO
 ;;   Y = 00
 ;;   C = 1
 ;;
-;; Alignment must end up between xxx8 and xxxF to avoid page crossing in write_data
+;; Alignment must end up between xxx9 and xxx1 to avoid page crossing in write_data
 ;;
-;; Currently alignment ends up at xxx9
+;; Currently alignment ends up at xxxD
 
 MACRO loop_header
     ;; Pass 1 - VIA T2 = FF FF ; A = pattern
@@ -151,10 +154,12 @@ MACRO loop_header
     INY
 .store
     make_aligned
+    TXS
     SEC
     STY via_t2_counter_l
     STY via_t2_counter_h
     LDY #&00
+    STY via_tmp1
 ENDMACRO
 
 ;; This loop_footer handles looping back for the next memory column
@@ -162,6 +167,7 @@ ENDMACRO
 
 MACRO loop_footer loop_start
     make_aligned
+    TSX
     BIT via_acr             ;; Bit 7 of the ACR set indicates pass 1
     BMI skip_correction     ;; Pass 2/3 correct test data at end of each col
 IF (screen_base = &8000)
@@ -174,6 +180,7 @@ ENDIF
     SEC
 .skip_correction
     INY
+    STY via_tmp1
     BEQ loop_exit
     JMP loop_start
 .loop_exit
@@ -315,12 +322,7 @@ ENDMACRO
 
 ;; disable interrupts (only needed if invoked as a program)
     SEI
-
-;; reset the stack pointer (even though it's not used, just in case)
-;; (for debugging it helps to replace the JMP in compare_data with JSR)
-    LDX #&FF
-    TXS
-    INX
+    CLD
 
 ;; Clear the screen
 
@@ -453,36 +455,22 @@ NEXT
 
 .fail
     ;; Boooh! One of the tests has failed, at this point the compare_data macro has set:
-    ;; A = reference value
-    ;; X = high byte of failed address
-    ;; Y = low  byte of failed address
+    ;;        A = error value (value read EOR value written)
+    ;;        X = reference value (written to memory)
+    ;;        Y = high byte of failed address
+    ;; via_tmp1 = low  byte of failed address
 
     ;; 0123456789abcdef0123456789abcdef
     ;; FAILED AT ???? W:?? R:??
+    STA via_tmp2
+    LDA via_tmp1
+    out_hex_a row_result+&0C
+    TYA
+    out_hex_a row_result+&0A
+    TXA
     out_hex_a row_result+&11
     TXA
-    out_hex_a row_result+&0A
-    TYA
-    out_hex_a row_result+&0C
-
-    ;; Write some self-modifying code into the screen
-    ;; LDA XXYY; JMP continue
-    LDA #&AD
-    STA row_result
-    STY row_result+1
-    STX row_result+2
-    LDA #&4C
-    STA row_result+3
-    LDA #<continue
-    STA row_result+4
-    LDA #>continue
-    STA row_result+5
-
-    ;; Execute it
-    JMP row_result
-
-    ;; And output the value read
-.continue
+    EOR via_tmp2
     out_hex_a row_result+&16
 
     LDX #(msg_failed - messages)

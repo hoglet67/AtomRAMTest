@@ -294,6 +294,28 @@ ENDIF
     BNE loop
 ENDMACRO
 
+
+;; The re_read_yyxx macro reads the failed location additional times
+;; using self-modifying code witten into the screen memory
+MACRO re_read_yyxx screen
+    ;; LDA XXYY; JMP continue
+    LDA #&AD
+    STA row_result
+    STX row_result+1
+    STY row_result+2
+    LDA #&4C
+    STA row_result+3
+    LDA #<continue
+    STA row_result+4
+    LDA #>continue
+    STA row_result+5
+    ;; Execute it
+    JMP row_result
+.continue
+    ;; And output the value read
+    out_hex_a screen
+ENDMACRO
+
 ;; ******************************************************************
 ;; Atom ATM file Header
 ;; ******************************************************************
@@ -463,15 +485,21 @@ NEXT
     ;; 0123456789abcdef0123456789abcdef
     ;; FAILED AT ???? W:?? R:??
     STA via_tmp2
-    LDA via_tmp1
-    out_hex_a row_result+&0C
-    TYA
-    out_hex_a row_result+&0A
     TXA
     out_hex_a row_result+&11
     TXA
     EOR via_tmp2
     out_hex_a row_result+&16
+
+    LDX via_tmp1
+    TXA
+    out_hex_a row_result+&0C
+    TYA
+    out_hex_a row_result+&0A
+
+    ;; This uses self modifying code in the screen memory, so a bit dodgy!
+    re_read_yyxx row_result+&19
+    re_read_yyxx row_result+&1C
 
     LDX #(msg_failed - messages)
     ;; fall through to
@@ -553,7 +581,7 @@ MAPCHAR &40,&5F,&00
     EQUB 0
 
 .msg_failed
-    EQUS "FAILED AT ???? W:?? R:??"
+    EQUS "FAILED AT ???? W:?? R:??:??:??"
     EQUB 0
 
 .msg_irq

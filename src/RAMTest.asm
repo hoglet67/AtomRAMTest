@@ -241,21 +241,16 @@ MACRO out_hex_digit screen
     STA screen
 ENDMACRO
 
-;; The out_hex_y macro writes two hex digits in Y (00-FF) to
-;; screen memory, using the above out_hex_digit for each nibble.
+;; Same as above, but writes to screen, Y
 
-MACRO out_hex_y screen
-    TYA
-    LSR A
-    LSR A
-    LSR A
-    LSR A
-    out_hex_digit screen
-    TYA
-    AND #&0F
-    out_hex_digit screen+1
+MACRO out_hex_digit_iy screen
+    ORA #&30
+    CMP #&3A
+    BCC store
+    SBC #&39
+.store
+    STA screen, Y
 ENDMACRO
-
 
 ;; The out_hex_a macro writes two hex digits in A (00-FF) to
 ;; screen memory, using the above out_hex_digit for each nibble.
@@ -271,6 +266,22 @@ macro out_hex_a screen
     TXA
     AND #&0F
     out_hex_digit screen+1
+    TSX
+ENDMACRO
+
+;; Same as above, but writes to screen, Y
+
+macro out_hex_a_iy screen
+    TXS
+    TAX
+    LSR A
+    LSR A
+    LSR A
+    LSR A
+    out_hex_digit_iy screen
+    TXA
+    AND #&0F
+    out_hex_digit_iy screen+1
     TSX
 ENDMACRO
 
@@ -297,12 +308,14 @@ ENDMACRO
 
 ;; The re_read_yyxx macro reads the failed location additional times
 ;; using self-modifying code witten into the screen memory
-MACRO re_read_yyxx screen
+MACRO re_read_failed
     ;; LDA XXYY; JMP continue
     LDA #&AD
     STA row_result
-    STX row_result+1
-    STY row_result+2
+    LDA via_tmp1
+    STA row_result+1
+    LDA via_tmp2
+    STA row_result+2
     LDA #&4C
     STA row_result+3
     LDA #<continue
@@ -313,7 +326,6 @@ MACRO re_read_yyxx screen
     JMP row_result
 .continue
     ;; And output the value read
-    out_hex_a screen
 ENDMACRO
 
 ;; ******************************************************************
@@ -394,8 +406,7 @@ ENDMACRO
     BVC not_pass2
     LDA increment_list, X
 .not_pass2
-    TAY
-    out_hex_y row_data+&08
+    out_hex_a row_data+&08
 
     ;; At the start of a write pass, reset the VIA T2 counter to a deterministic state
     loop_header
@@ -481,25 +492,44 @@ NEXT
     ;;        X = reference value (written to memory)
     ;;        Y = high byte of failed address
     ;; via_tmp1 = low  byte of failed address
+    ;; via_tmp2 = spare
 
     ;; 0123456789abcdef0123456789abcdef
     ;; FAILED AT ???? W:?? R:??
     STA via_tmp2
-    TXA
-    out_hex_a row_result+&11
-    TXA
-    EOR via_tmp2
-    out_hex_a row_result+&16
 
-    LDX via_tmp1
-    TXA
-    out_hex_a row_result+&0C
+    ;; High byte of address
     TYA
     out_hex_a row_result+&0A
 
-    ;; This uses self modifying code in the screen memory, so a bit dodgy!
-    re_read_yyxx row_result+&19
-    re_read_yyxx row_result+&1C
+    ;; Low byta of address
+    LDA via_tmp1
+    out_hex_a row_result+&0C
+
+    ;; Reference value
+    TXA
+    out_hex_a row_result+&11
+
+    ;; read value
+    TXA
+    EOR via_tmp2
+
+    STY via_tmp2
+    ;;        A = hold value read from memory
+    ;;        X = spare
+    ;;        Y = spare
+    ;; via_tmp1 = low byte of failed address
+    ;; via_tmp2 = high byte of failed address
+    LDY #&00
+
+.loop
+    out_hex_a_iy row_result+&16
+    re_read_failed
+    INY
+    INY
+    INY
+    CPY #3*3
+    BNE loop
 
     LDX #(msg_failed - messages)
     ;; fall through to

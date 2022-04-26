@@ -82,18 +82,18 @@ via_acr          = via_base + &0B
 
 ;; Screen addresses for particular messages
 row_title        = screen_base + &00
-row_cycles       = screen_base + &80
-row_pass         = screen_base + &A0
+row_pass         = screen_base + &80
+row_test         = screen_base + &A0
 row_data         = screen_base + &C0
 row_result       = screen_base + &100
 
-;; ACR values for each pass
+;; ACR values for each test
 ;;
-;; (bit 7 set indicates pass 1)
-;; (bit 6 set indicates pass 2)
-acr_pass1        = &A0
-acr_pass2        = &60
-acr_pass3        = &00
+;; (bit 7 set indicates test 1)
+;; (bit 6 set indicates test 2)
+acr_test1        = &A0
+acr_test2        = &60
+acr_test3        = &00
 
 ;; ******************************************************************
 ;; Macros
@@ -102,13 +102,13 @@ acr_pass3        = &00
 ;; The write_data macro writes a byte of data (in A) to an offset in
 ;; a memory page, using Y as the index within the page.
 ;;
-;; In the first pass of the test, the VIA T2 counter is forced to FFFF,
+;; In the first test, the VIA T2 counter is forced to FFFF,
 ;; so the value in A is written directly.
 ;;
-;; In the second pass of the test, the VIA T2 counter is forced to 00FF,
+;; In the second test, the VIA T2 counter is forced to 00FF,
 ;; so the value in A is incremented by 1 each time.
 ;;
-;; In the third pass of the test, the VIA T2 counter is free-running,
+;; In the third test, the VIA T2 counter is free-running,
 ;; so the value in A is perturbed by ADCing with the current counter
 ;; value, which gives a pseudo-random(ish) stream of data.
 ;;
@@ -122,7 +122,7 @@ acr_pass3        = &00
 ;; Entered with C=1, exits with C=1
 
 MACRO write_data page
-    ADC via_t2_counter_l + (page AND 1) ; 4 - pass 1: T2-L/H loaded with FF, so A unchanged
+    ADC via_t2_counter_l + (page AND 1) ; 4 - test 1: T2-L/H loaded with FF, so A unchanged
     STA page * &100, Y                  ; 5
     CMP (0, X)                          ; 6 - waste 6 cycles with a few bytes as possible
     SEC                                 ; 2
@@ -133,7 +133,7 @@ ENDMACRO
 ;;
 ;; This macro mirrors the read_data macro
 ;;
-;; In the final pass, it's critical that the VIA T2 counter values
+;; In the final test, it's critical that the VIA T2 counter values
 ;; exactly match those used when the data was written. This means the
 ;; macro must also take exactly 11 cycles. As it contains a forward
 ;; branch instruction, this must never cross a page boundary. The
@@ -152,7 +152,7 @@ ENDMACRO
 ;; => macro must be aligned to xxx6 -> xxx0
 ;;
 MACRO compare_data page
-    ADC via_t2_counter_l + (page AND 1) ; 4 +00 - pass 1: T2-L/H loaded with FF, so A unchanged
+    ADC via_t2_counter_l + (page AND 1) ; 4 +00 - test 1: T2-L/H loaded with FF, so A unchanged
     SEC                                 ; 2 +03
     TAX                                 ; 2 +04 - save the reference value
     EOR page * &100, Y                  ; 4 +05 - use EOR rather than CMP so we have a record of the error
@@ -176,12 +176,12 @@ MACRO make_aligned
 .align
 ENDMACRO
 
-;; The loop_header macro is at the start of write or compare pass.
+;; The loop_header macro is at the start of write or compare phase.
 ;;
-;; It sets the VIA t2 counter to the required value for that pass:
-;;    pass 1: ACR=&A0; t2_h=&FF; t2_l=&FF => Data unchanged
-;;    pass 2: ACR=&60; t2_h=&00; t2_l=&FF => Data incremented by one
-;;    pass 3: ACR=&00; t2_h=&FF; t2_l=&FF => Data randomly perturbed
+;; It sets the VIA t2 counter to the required value for that test:
+;;    test 1: ACR=&A0; t2_h=&FF; t2_l=&FF => Data unchanged
+;;    test 2: ACR=&60; t2_h=&00; t2_l=&FF => Data incremented by one
+;;    test 3: ACR=&00; t2_h=&FF; t2_l=&FF => Data randomly perturbed
 ;;
 ;; must exit with:
 ;;   A = test data/anchor/seed
@@ -191,16 +191,16 @@ ENDMACRO
 ;;
 ;; Alignment must end up between xxx6 and xxx0 to avoid page crossing in write_data
 ;;
-;; Currently alignment ends up at xxxB
+;; Currently alignment ends up at xxxA
 
 MACRO loop_header
-    ;; Pass 1 - VIA T2 = FF FF ; A = pattern
-    ;; Pass 3 - VIA T2 = FF FF ; A = pattern
+    ;; Test 1 - VIA T2 = FF FF ; A = pattern
+    ;; Test 3 - VIA T2 = FF FF ; A = pattern
     LDY #&FF
     LDA pattern_list, X
     BIT via_acr
     BVC store
-    ;; Pass 2 - VIA T2 = 00 00 ; A = FF
+    ;; Test 2 - VIA T2 = 00 00 ; A = FF
     TYA
     INY
 .store
@@ -218,8 +218,8 @@ ENDMACRO
 MACRO loop_footer loop_start
     make_aligned
     TSX
-    BIT via_acr             ;; Bit 7 of the ACR set indicates pass 1
-    BMI skip_correction     ;; Pass 2/3 correct test data at end of each col
+    BIT via_acr             ;; Bit 7 of the ACR set indicates test 1
+    BMI skip_correction     ;; Test 2/3 correct test data at end of each col
     SBC #num_pages
     CLC
     ADC increment_list, X
@@ -432,10 +432,10 @@ IF (include_count)
     INC via_iorb    ;; MSB is at B800
 .skip
     LDX #1
-    LDY #10
+    LDY #8
 .loop
     LDA via_iorb, X
-    out_hex_a_iy row_cycles
+    out_hex_a_iy row_pass
     DEY
     DEY
     DEX
@@ -443,23 +443,23 @@ IF (include_count)
 }
 ENDIF
 
-    ;; In pass 1 the VIA T2 counter is set to pulse counting mode (VIA ACR=0xA0)
+    ;; In test 1 the VIA T2 counter is set to pulse counting mode (VIA ACR=0xA0)
     ;; so it doesn't change. The counter is preloaded with FFFF, which causes the test
     ;; data to remain fixed.
     ;;
-    ;; In pass 2 the VIA T2 counter is set to pulse counting mode (VIA ACR=0x60)
+    ;; In test 2 the VIA T2 counter is set to pulse counting mode (VIA ACR=0x60)
     ;; so it doesn't change. The counter is preloaded with 00FF, which causes the test
     ;; data to increment by one each row (page).
     ;;
-    ;; In pass 3 the VIA T2 counter is set to free running counter mode (VIA ACR=0x00)
+    ;; In test 3 the VIA T2 counter is set to free running counter mode (VIA ACR=0x00)
     ;; so it decrements at 1MHz. The counter is preloaded with FFFF, which causes the test data
     ;; to be psuedo-random(ish)
     ;;
-    ;; The ACR is also in effect tracking whether we are in pass 1, 2 or 3
+    ;; The ACR is also in effect tracking whether we are in test 1, 2 or 3
     ;; (as we don't want to assume any RAM is useable).
 
-    LDA #acr_pass1
-    LDX #(msg_pass1 - messages)
+    LDA #acr_test1
+    LDX #(msg_test1 - messages)
     LDY #(row_title - screen_base)
 
 .test_loop1
@@ -475,12 +475,12 @@ ENDIF
     ;; Output the current pattern to the right place on the screen
     LDA pattern_list, X
     BIT via_acr
-    BVC not_pass2
+    BVC not_test2
     LDA increment_list, X
-.not_pass2
-    out_hex_a row_data+&08
+.not_test2
+    out_hex_a row_data+&06
 
-    ;; At the start of a write pass, reset the VIA T2 counter to a deterministic state
+    ;; At the start of a write phase, reset the VIA T2 counter to a deterministic state
     loop_header
 
 .write_loop
@@ -515,7 +515,7 @@ ENDIF
 
     ;; We are now ready to read back and compare the written data...
 
-    ;; At the start of a compare pass, reset the VIA T2 counter to a deterministic state
+    ;; At the start of a compare phase, reset the VIA T2 counter to a deterministic state
     loop_header
 
 .compare_loop
@@ -553,32 +553,32 @@ ENDIF
     ;; Move on to the next pattern
     INX
     CPX #pattern_list_end - pattern_list
-    BEQ next_pass
+    BEQ next_test
     JMP test_loop2
 
-.next_pass
-    ;; The ACR is used to distingish the pass (as we have no RAM and no spare registers)
-    LDY #(row_pass - screen_base)
+.next_test
+    ;; The ACR is used to distingish the test (as we have no RAM and no spare registers)
+    LDY #(row_test - screen_base)
     LDA via_acr
-    CMP #acr_pass1
-    BEQ pass2
-    CMP #acr_pass2
-    BEQ pass3
+    CMP #acr_test1
+    BEQ test2
+    CMP #acr_test2
+    BEQ test3
 
 .success
     ;; Yeeehhh! All the tests have passed
     JMP test_loop0
 
-.pass2
-    ;; Get setup for pass 2
-    LDA #acr_pass2
-    LDX #(msg_pass2 - messages)
+.test2
+    ;; Get setup for test 2
+    LDA #acr_test2
+    LDX #(msg_test2 - messages)
     JMP test_loop1
 
-.pass3
-    ;; Get setup for pass 3
-    LDA #acr_pass3
-    LDX #(msg_pass3 - messages)
+.test3
+    ;; Get setup for test 3
+    LDA #acr_test3
+    LDX #(msg_test3 - messages)
     JMP test_loop1
 
 .fail
@@ -664,9 +664,9 @@ MAPCHAR &40,&5F,&00
 
 .messages
 
-.msg_pass1
+.msg_test1
     EQUS "ATOM RAM TEST"
-    EQUB &80, &80
+    EQUB &80
 
     EQUS "TESTING PAGES "
     EQUS STR$~(page_start1 DIV &10 MOD &10)
@@ -698,34 +698,31 @@ ENDIF
     EQUS "-"
     EQUS STR$~((test_end-1) DIV &1000 MOD &10)
     EQUS STR$~((test_end-1) DIV  &100 MOD &10)
-    EQUB &80
+    EQUB &80, &80
+
 IF (include_count)
-    EQUS "CYCLES:"
+    EQUS "PASS:"
 ENDIF
     EQUB &80
 
-    EQUS "PASS 1: FIXED DATA"
+    EQUS "TEST: FIXED DATA"
     EQUB &80
 
-    EQUS "  DATA: "
+    EQUS "DATA:"
     EQUB 0
 
-.msg_pass2
-    EQUS "PASS 2: INCREMENTING DATA"
+.msg_test2
+    EQUS "TEST: INCREMENTING DATA"
     EQUB &80
 
-    EQUS "  SKEW: "
+    EQUS "SKEW:"
     EQUB 0
 
-.msg_pass3
-    EQUS "PASS 3: PSEUDO-RANDOM DATA"
+.msg_test3
+    EQUS "TEST: PSEUDO-RANDOM DATA"
     EQUB &80
 
-    EQUS "  SEED: "
-    EQUB 0
-
-.msg_passed
-    EQUS "PASSED"
+    EQUS "SEED:"
     EQUB 0
 
 .msg_failed

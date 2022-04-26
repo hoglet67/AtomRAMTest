@@ -40,6 +40,9 @@ page_end2        =? &FE
 page_start3      =? &FF
 page_end3        =? &FE
 
+;; Whether to display test cycles count
+include_count    =? TRUE
+
 ;; ******************************************************************
 ;; Calculated parameters
 ;; ******************************************************************
@@ -65,6 +68,10 @@ ENDIF
 
 ;; The Atom's VIA T2 counter is used as a source of pseudo-random(ish) data.
 via_base         = &B800
+via_iorb         = via_base + &00
+via_iora         = via_base + &01
+via_ddrb         = via_base + &02
+via_ddra         = via_base + &03
 via_tmp1         = via_base + &06
 via_tmp2         = via_base + &07
 via_t2_counter_l = via_base + &08
@@ -75,6 +82,7 @@ via_acr          = via_base + &0B
 
 ;; Screen addresses for particular messages
 row_title        = screen_base + &00
+row_cycles       = screen_base + &80
 row_pass         = screen_base + &A0
 row_data         = screen_base + &C0
 row_result       = screen_base + &100
@@ -342,7 +350,6 @@ ENDIF
     BNE loop
 ENDMACRO
 
-
 ;; The re_read_yyxx macro reads the failed location additional times
 ;; using self-modifying code witten into the screen memory
 MACRO re_read_failed
@@ -395,11 +402,6 @@ ENDMACRO
     SEI
     CLD
 
-;; Clear the screen
-
-    LDY #&00
-    out_clear_screen TRUE, TRUE
-
 ;; initialize the Atom 8255 PIA (exactly as the Atom Reset handler would)
     LDA #&8A
     STA &B003
@@ -407,6 +409,39 @@ ENDMACRO
     STA &B002
     LDA #screen_init
     STA &B000
+
+IF (include_count)
+    LDY #&FF
+    STY via_ddra
+    STY via_ddrb
+    INY
+    STY via_iora
+    STY via_iorb
+ENDIF
+
+.test_loop0
+
+;; Clear the screen
+    LDY #&00
+    out_clear_screen TRUE, TRUE
+
+IF (include_count)
+{
+    INC via_iora    ;; LSB is at B801
+    BNE skip
+    INC via_iorb    ;; MSB is at B800
+.skip
+    LDX #1
+    LDY #10
+.loop
+    LDA via_iorb, X
+    out_hex_a_iy row_cycles
+    DEY
+    DEY
+    DEX
+    BPL loop
+}
+ENDIF
 
     ;; In pass 1 the VIA T2 counter is set to pulse counting mode (VIA ACR=0xA0)
     ;; so it doesn't change. The counter is preloaded with FFFF, which causes the test
@@ -532,7 +567,7 @@ ENDIF
 
 .success
     ;; Yeeehhh! All the tests have passed
-    JMP test
+    JMP test_loop0
 
 .pass2
     ;; Get setup for pass 2
@@ -663,7 +698,11 @@ ENDIF
     EQUS "-"
     EQUS STR$~((test_end-1) DIV &1000 MOD &10)
     EQUS STR$~((test_end-1) DIV  &100 MOD &10)
-    EQUB &80, &80
+    EQUB &80
+IF (include_count)
+    EQUS "CYCLES:"
+ENDIF
+    EQUB &80
 
     EQUS "PASS 1: FIXED DATA"
     EQUB &80

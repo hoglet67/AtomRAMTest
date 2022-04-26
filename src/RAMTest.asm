@@ -12,8 +12,15 @@
 ;;
 ;; ******************************************************************
 
-;; The code is assembled from this address, which is passed in from build.sh
+;; ******************************************************************
+;; Build parameters, optionally passed in from build.sh
+;; ******************************************************************
+
+;; The code is assembled from this address
 exec_page        =? &82
+
+;; Size for the build (normally 4K)
+rom_size         =? &1000
 
 ;; Screen base address
 screen_base      =? &8000
@@ -32,6 +39,10 @@ page_end2        =? &FE
 ;; The start/end pages in RAM that are tested, block 3
 page_start3      =? &FF
 page_end3        =? &FE
+
+;; ******************************************************************
+;; Calculated parameters
+;; ******************************************************************
 
 ;; Calculate the code start address
 test_start = exec_page * &100
@@ -372,7 +383,7 @@ ENDMACRO
 ;; ******************************************************************
 
    ORG test_start
-   GUARD test_start + &FFA
+   GUARD test_start + rom_size - 6
 
 .test
 
@@ -749,11 +760,11 @@ ENDIF
 ;; 6502 Vectors (at the end of the 4K ROM)
 ;; ******************************************************************
 
-    PRINT "Free Space: ", test_start + &FFA - pattern_list_end
+    PRINT "Free Space: ", test_start + rom_size - 6 - pattern_list_end
 
-    CLEAR test_start + &FFA, test_start + &FFF
+    CLEAR test_start + rom_size - 6, test_start + rom_size - 1
 
-    ORG test_start + &FFA
+    ORG test_start + rom_size - 6
 
     EQUW NMI_HANDLER
     EQUW RST_HANDLER

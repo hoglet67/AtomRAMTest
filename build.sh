@@ -3,7 +3,7 @@
 mkdir -p build
 rm -f build/*
 
-rom_build_names=(
+bulk_build_names=(
     ROM060
     ROM066
     ROM068
@@ -11,11 +11,11 @@ rom_build_names=(
     ROM166
     ROM168
     ROM320
-#   ROM326
-#   ROM328 # won't fit
 )
 
-ram_build_names=(
+individual_build_names=(
+    ROM326
+    ROM328
     RAM060
     RAM160
     RAM320
@@ -29,7 +29,7 @@ ram_build_names=(
 
 declare -A params
 
-# Builds that run from ROM
+# Bulk builds (ROM, assemled to A0 C0 D0 E0 F0)
 
 params[ROM060]="-D page_start1=&00 -D page_end1=&03 -D page_start2=&28 -D page_end2=&3B"
 params[ROM066]="-D page_start1=&00 -D page_end1=&03 -D page_start2=&28 -D page_end2=&3B -D page_start3=&82 -D page_end3=&97"
@@ -38,21 +38,21 @@ params[ROM160]="-D page_start1=&00 -D page_end1=&3F"
 params[ROM166]="-D page_start1=&00 -D page_end1=&3F -D page_start2=&82 -D page_end2=&97"
 params[ROM168]="-D page_start1=&00 -D page_end1=&3F -D page_start2=&82 -D page_end2=&9F"
 params[ROM320]="-D page_start1=&00 -D page_end1=&7F"
-params[ROM326]="-D page_start1=&00 -D page_end1=&7F -D page_start2=&82 -D page_end2=&97"
-params[ROM328]="-D page_start1=&00 -D page_end1=&7F -D page_start2=&82 -D page_end2=&9F"
 
-# Builds that run from RAM
+# Individual builds
 
+params[ROM326]="-D exec_page=&E0 -D page_start1=&00 -D page_end1=&7F -D page_start2=&82 -D page_end2=&97 -D rom_size=&2000"
+params[ROM328]="-D exec_page=&E0 -D page_start1=&00 -D page_end1=&7F -D page_start2=&82 -D page_end2=&9F -D rom_size=&2000"
 params[RAM060]="-D exec_page=&82 -D page_start1=&00 -D page_end1=&03 -D page_start2=&28 -D page_end2=&3B"
 params[RAM160]="-D exec_page=&82 -D page_start1=&00 -D page_end1=&3F"
 params[RAM320]="-D exec_page=&82 -D page_start1=&00 -D page_end1=&7F"
 params[RAM006]="-D exec_page=&29 -D page_start1=&82 -D page_end1=&97"
 params[RAM008]="-D exec_page=&29 -D page_start1=&82 -D page_end1=&9F"
 params[RAM246]="-D exec_page=&70 -D page_start1=&00 -D page_end1=&5F -D page_start2=&82 -D page_end2=&97"
-params[RAM248]="-D exec_page=&70 -D page_start1=&00 -D page_end1=&5F -D page_start2=&82 -D page_end2=&97"
+params[RAM248]="-D exec_page=&70 -D page_start1=&00 -D page_end1=&5F -D page_start2=&82 -D page_end2=&9F"
 params[RAMCL4]="-D exec_page=&29 -D page_start1=&80 -D page_end1=&97 -D screen_base=&3A00 -D screen_init=&F0"
 
-for build in "${rom_build_names[@]}"
+for build in "${bulk_build_names[@]}"
 do
     for exec in A0 C0 D0 E0 F0
     do
@@ -66,7 +66,7 @@ do
     done
 done
 
-for build in "${ram_build_names[@]}"
+for build in "${individual_build_names[@]}"
 do
     name=${build}
     echo $name

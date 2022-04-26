@@ -40,8 +40,8 @@ page_end2        =? &FE
 page_start3      =? &FF
 page_end3        =? &FE
 
-;; Whether to display test cycles count
-include_count    =? TRUE
+;; Whether to display test cycles count (set to zero to disable this feature)
+count_digits     =? 3
 
 ;; ******************************************************************
 ;; Calculated parameters
@@ -410,36 +410,30 @@ ENDMACRO
     LDA #screen_init
     STA &B000
 
-IF (include_count)
-    LDY #&FF
-    STY via_ddra
-    STY via_ddrb
-    INY
-    STY via_iora
-    STY via_iorb
-ENDIF
-
-.test_loop0
-
 ;; Clear the screen
     LDY #&00
     out_clear_screen TRUE, TRUE
 
-IF (include_count)
+    LDX #(msg_title - messages)
+    LDY #(row_title - screen_base)
+    JMP test_first_time
+
+.test_loop0
+
+;; Increment the pass count
+IF (count_digits > 0)
 {
-    INC via_iora    ;; LSB is at B801
-    BNE skip
-    INC via_iorb    ;; MSB is at B800
-.skip
-    LDX #1
-    LDY #8
+    LDX #count_digits
 .loop
-    LDA via_iorb, X
-    out_hex_a_iy row_pass
-    DEY
-    DEY
+    INC row_pass + 5, X
+    LDA row_pass + 5, X
+    CMP #'9'+1
+    BCC done
+    LDA #'0'
+    STA row_pass + 5, X
     DEX
-    BPL loop
+    BNE loop
+.done
 }
 ENDIF
 
@@ -458,9 +452,11 @@ ENDIF
     ;; The ACR is also in effect tracking whether we are in test 1, 2 or 3
     ;; (as we don't want to assume any RAM is useable).
 
-    LDA #acr_test1
     LDX #(msg_test1 - messages)
-    LDY #(row_title - screen_base)
+    LDY #(row_test - screen_base)
+
+.test_first_time
+    LDA #acr_test1
 
 .test_loop1
     STA via_acr
@@ -664,7 +660,7 @@ MAPCHAR &40,&5F,&00
 
 .messages
 
-.msg_test1
+.msg_title
     EQUS "ATOM RAM TEST"
     EQUB &80
 
@@ -700,19 +696,26 @@ ENDIF
     EQUS STR$~((test_end-1) DIV  &100 MOD &10)
     EQUB &80, &80
 
-IF (include_count)
-    EQUS "PASS:"
+IF (count_digits > 0)
+    EQUS "PASS: "
+    IF (count_digits > 1)
+        FOR i, 1, count_digits-1
+            EQUS "0"
+        NEXT
+    ENDIF
+    EQUS "1"
 ENDIF
     EQUB &80
 
-    EQUS "TEST: FIXED DATA"
+.msg_test1
+    EQUS "TEST: FIXED DATA        "
     EQUB &80
 
     EQUS "DATA:"
     EQUB 0
 
 .msg_test2
-    EQUS "TEST: INCREMENTING DATA"
+    EQUS "TEST: INCREMENTING DATA "
     EQUB &80
 
     EQUS "SKEW:"

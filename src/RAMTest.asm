@@ -474,8 +474,7 @@ NEXT
 
 .success
     ;; Yeeehhh! All the tests have passed
-    LDX #(msg_passed - messages)
-    JMP halt_message
+    JMP test
 
 .pass2
     ;; Get setup for pass 2

@@ -13,17 +13,44 @@
 ;; ******************************************************************
 
 ;; The code is assembled from this address, which is passed in from build.sh
-test_start       =? &8200
-
-;; The start/end pages in RAM that are tested
-page_start       =? &00
-page_end         =? &7F
+exec_page        =? &82
 
 ;; Screen base address
 screen_base      =? &8000
 
 ;; Screen initialization value (8255 PIA port A at #B000)
 screen_init      =? &00
+
+;; The start/end pages in RAM that are tested, block 1
+page_start1      =? &00
+page_end1        =? &7F
+
+;; The start/end pages in RAM that are tested, block 2
+page_start2      =? &FF
+page_end2        =? &FE
+
+;; The start/end pages in RAM that are tested, block 3
+page_start3      =? &FF
+page_end3        =? &FE
+
+;; Calculate the code start address
+test_start = exec_page * &100
+
+;; Total number of pages
+IF (screen_base = &8000)
+    num_pages = (page_end1 - page_start1 + 1) + (page_end2 - page_start2 + 1) + (page_end3 - page_start3 + 1) + 1
+ELSE
+    num_pages = (page_end1 - page_start1 + 1) + (page_end2 - page_start2 + 1) + (page_end3 - page_start3 + 1)
+ENDIF
+
+;; The last page being tested
+IF (page_start3 <= page_end3)
+    page_end = page_end3
+ELIF (page_start2 <= page_end2)
+    page_end = page_end2
+ELSE
+    page_end = page_end1
+ENDIF
 
 ;; The Atom's VIA T2 counter is used as a source of pseudo-random(ish) data.
 via_base         = &B800
@@ -174,11 +201,7 @@ MACRO loop_footer loop_start
     TSX
     BIT via_acr             ;; Bit 7 of the ACR set indicates pass 1
     BMI skip_correction     ;; Pass 2/3 correct test data at end of each col
-IF (screen_base = &8000)
-    SBC #(page_end - page_start + 2)
-ELSE
-    SBC #(page_end - page_start + 1)
-ENDIF
+    SBC #num_pages
     CLC
     ADC increment_list, X
     SEC
@@ -424,9 +447,21 @@ ENDIF
     ;; Cascade the write_data macro N times, once per page being tested
     ;; A = test data value
     ;; Y = index within the page
-FOR page, page_start, page_end
-    write_data page
-NEXT
+IF (page_start1 <= page_end1)
+    FOR page, page_start1, page_end1
+        write_data page
+    NEXT
+ENDIF
+IF (page_start2 <= page_end2)
+    FOR page, page_start2, page_end2
+        write_data page
+    NEXT
+ENDIF
+IF (page_start3 <= page_end3)
+     FOR page, page_start3, page_end3
+        write_data page
+     NEXT
+ENDIF
 
     ;; Loop back for the next index (Y) within the page. 16-byte alignment is
     ;; important here to avoid the done branch crossing a page)
@@ -447,9 +482,21 @@ ENDIF
     ;; Cascade the compare_data macro N times, once per page being tested
     ;; A = reference data value
     ;; Y = index within the page
-FOR page, page_start, page_end
-    compare_data page
-NEXT
+IF (page_start1 <= page_end1)
+    FOR page, page_start1, page_end1
+        compare_data page
+    NEXT
+ENDIF
+IF (page_start2 <= page_end2)
+     FOR page, page_start2, page_end2
+        compare_data page
+     NEXT
+ENDIF
+IF (page_start3 <= page_end3)
+    FOR page, page_start3, page_end3
+        compare_data page
+    NEXT
+ENDIF
 
     ;; Loop back for the next index (Y) within the page. 16-byte alignment is
     ;; important here to avoid the done branch crossing a page)
@@ -575,20 +622,36 @@ MAPCHAR &40,&5F,&00
     EQUS "ATOM RAM TEST"
     EQUB &80, &80
 
-    EQUS "TESTING #"
-    EQUS STR$~(page_start DIV &10 MOD &10)
-    EQUS STR$~(page_start         MOD &10)
-    EQUS "00-#"
-    EQUS STR$~(page_end  DIV &10 MOD &10)
-    EQUS STR$~(page_end          MOD &10)
-    EQUS "FF"
+    EQUS "TESTING PAGES "
+    EQUS STR$~(page_start1 DIV &10 MOD &10)
+    EQUS STR$~(page_start1         MOD &10)
+    EQUS "-"
+    EQUS STR$~(page_end1  DIV &10 MOD &10)
+    EQUS STR$~(page_end1          MOD &10)
+IF (page_start2 <= page_end2)
+    EQUS ","
+    EQUS STR$~(page_start2 DIV &10 MOD &10)
+    EQUS STR$~(page_start2         MOD &10)
+    EQUS "-"
+    EQUS STR$~(page_end2  DIV &10 MOD &10)
+    EQUS STR$~(page_end2          MOD &10)
+ENDIF
+IF (page_start3 <= page_end3)
+    EQUS ","
+    EQUS STR$~(page_start3 DIV &10 MOD &10)
+    EQUS STR$~(page_start3         MOD &10)
+    EQUS "-"
+    EQUS STR$~(page_end3  DIV &10 MOD &10)
+    EQUS STR$~(page_end3          MOD &10)
+ENDIF
     EQUB &80
 
-    EQUS "RUNNING #"
+    EQUS "RUNNING FROM PAGES "
     EQUS STR$~(test_start DIV &1000 MOD &10)
-    EQUS STR$~(test_start DIV &0100 MOD &10)
-    EQUS STR$~(test_start DIV &0010 MOD &10)
-    EQUS STR$~(test_start           MOD &10)
+    EQUS STR$~(test_start DIV  &100 MOD &10)
+    EQUS "-"
+    EQUS STR$~((test_end-1) DIV &1000 MOD &10)
+    EQUS STR$~((test_end-1) DIV  &100 MOD &10)
     EQUB &80, &80
 
     EQUS "PASS 1: FIXED DATA"

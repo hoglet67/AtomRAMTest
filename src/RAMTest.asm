@@ -638,7 +638,7 @@ ENDIF
 
 .halt
     ;; Loop forever....
-    BEQ halt
+    JMP halt
 
 ;; We don't expect IRQ to occur, but just in case....
 

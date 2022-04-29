@@ -546,11 +546,33 @@ ENDIF
 
     ;; All the time critical stuff is over now
 
+    ;; Test for EEPT key
+    BIT &B002
+    BVC exit
+
     ;; Move on to the next pattern
     INX
     CPX #pattern_list_end - pattern_list
     BEQ next_test
     JMP test_loop2
+
+    ;; Exiting the F000 rom version is complicated because you need
+    ;; need to switch ROM banks, which can only be safely done from RAM
+.exit
+    LDX #exit_end - exit_start - 1
+.exit_loop
+    LDA exit_start, X
+    STA row_result, X
+    DEX
+    BPL exit_loop
+    JMP row_result
+
+    ;; Code to switch back to the default ROM bank at 1MHz
+.exit_start
+    LDA #&06
+    STA &BFFE
+    JMP (&FFFC)
+.exit_end
 
 .next_test
     ;; The ACR is used to distingish the test (as we have no RAM and no spare registers)
@@ -637,8 +659,17 @@ ENDIF
     out_clear_screen FALSE, TRUE
 
 .halt
-    ;; Loop forever....
-    JMP halt
+    ;; These NOPs can act as a trigger
+    NOP
+    NOP
+    NOP
+    NOP
+.haltloop
+    ;; Loop until Shift pressed
+    BIT &B001
+    BMI haltloop
+    ;; Restart the test again
+    JMP test
 
 ;; We don't expect IRQ to occur, but just in case....
 

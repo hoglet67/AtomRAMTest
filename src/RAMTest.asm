@@ -66,16 +66,9 @@ ELSE
     page_end = page_end1
 ENDIF
 
-;; The Atom's VIA T2 counter is used as a source of pseudo-random(ish) data.
-via_base         = &B800
-via_iorb         = via_base + &00
-via_iora         = via_base + &01
-via_ddrb         = via_base + &02
-via_ddra         = via_base + &03
-via_tmp1         = via_base + &06
-via_tmp2         = via_base + &07
-via_t2_counter_l = via_base + &08
-via_t2_counter_h = via_base + &09
+;; use a couple of locations as temporary storage
+tmp1             = screen_base + &1FE
+tmp2             = screen_base + &1FF
 
 ;; Screen addresses for particular messages
 row_title        = screen_base + &00
@@ -296,9 +289,9 @@ MACRO re_read_failed
     ;; LDA XXYY; JMP continue
     LDA #&AD
     STA row_result
-    LDA via_tmp2
+    LDA tmp2
     STA row_result+1
-    LDA via_tmp1
+    LDA tmp1
     STA row_result+2
     LDA #&4C
     STA row_result+3
@@ -377,21 +370,6 @@ IF (count_digits > 0)
 }
 ENDIF
 
-    ;; In test 1 the VIA T2 counter is set to pulse counting mode (VIA ACR=0xA0)
-    ;; so it doesn't change. The counter is preloaded with FFFF, which causes the test
-    ;; data to remain fixed.
-    ;;
-    ;; In test 2 the VIA T2 counter is set to pulse counting mode (VIA ACR=0x60)
-    ;; so it doesn't change. The counter is preloaded with 00FF, which causes the test
-    ;; data to increment by one each row (page).
-    ;;
-    ;; In test 3 the VIA T2 counter is set to free running counter mode (VIA ACR=0x00)
-    ;; so it decrements at 1MHz. The counter is preloaded with FFFF, which causes the test data
-    ;; to be psuedo-random(ish)
-    ;;
-    ;; The ACR is also in effect tracking whether we are in test 1, 2 or 3
-    ;; (as we don't want to assume any RAM is useable).
-
     LDA #(msg_test1 - messages)
     LDY #(row_test - screen_base)
 
@@ -420,7 +398,6 @@ ENDIF
 .not_pattern_test
     out_hex_a row_data+&06   ;; X->S then S->X
 
-    ;; At the start of a write phase, reset the VIA T2 counter to a deterministic state
     loop_header
 
 .write_loop
@@ -455,7 +432,6 @@ ENDIF
 
     ;; We are now ready to read back and compare the written data...
 
-    ;; At the start of a compare phase, reset the VIA T2 counter to a deterministic state
     loop_header
 
 .compare_loop
@@ -549,13 +525,13 @@ ENDIF
     ;;        X = high byte of failed address
     ;;        Y = low  byte of failed address
     ;;        S = reference value (written to memory)
-    ;; via_tmp1 = spage
-    ;; via_tmp2 = spare
+    ;;     tmp1 = spate
+    ;;     tmp2 = spare
 
     ;; 0123456789abcdef0123456789abcdef
     ;; FAILED AT ???? W:?? R:??
-    STX via_tmp1      ;; via_tmp1 = MSB of address
-    STA via_tmp2      ;; via_tmp2 = error
+    STX tmp1          ;; via_tmp1 = MSB of address
+    STA tmp2          ;; via_tmp2 = error
 
     ;; Reference value
     TSX
@@ -563,7 +539,7 @@ ENDIF
     out_hex_a row_result+&11
 
     ;; High byte of address
-    LDA via_tmp1
+    LDA tmp1
     out_hex_a row_result+&0A
 
     ;; Low byta of address
@@ -572,9 +548,9 @@ ENDIF
 
     ;; read value
     TXA
-    EOR via_tmp2
+    EOR tmp2
 
-    STY via_tmp2    ;; via_tmp2 = LSB of address
+    STY tmp2    ;; via_tmp2 = LSB of address
     ;;        A = hold value read from memory
     ;;        X = spare
     ;;        Y = spare

@@ -77,23 +77,12 @@ via_tmp2         = via_base + &07
 via_t2_counter_l = via_base + &08
 via_t2_counter_h = via_base + &09
 
-;; The Atom's ACR is used in interesting ways (!!)
-via_acr          = via_base + &0B
-
 ;; Screen addresses for particular messages
 row_title        = screen_base + &00
 row_pass         = screen_base + &80
 row_test         = screen_base + &A0
 row_data         = screen_base + &C0
 row_result       = screen_base + &100
-
-;; ACR values for each test
-;;
-;; (bit 7 set indicates test 1)
-;; (bit 6 set indicates test 2)
-acr_test1        = &A0
-acr_test2        = &60
-acr_test3        = &00
 
 ;; ******************************************************************
 ;; Macros
@@ -102,30 +91,11 @@ acr_test3        = &00
 ;; The write_data macro writes a byte of data (in A) to an offset in
 ;; a memory page, using Y as the index within the page.
 ;;
-;; In the first test, the VIA T2 counter is forced to FFFF,
-;; so the value in A is written directly.
-;;
-;; In the second test, the VIA T2 counter is forced to 00FF,
-;; so the value in A is incremented by 1 each time.
-;;
-;; In the third test, the VIA T2 counter is free-running,
-;; so the value in A is perturbed by ADCing with the current counter
-;; value, which gives a pseudo-random(ish) stream of data.
-;;
-;; This macro is 9 bytes and is cascaded 128 times (once for each page
-;; begin tested) which adds up to 1152 bytes.
-;;
-;; This macro takes 17 cycles, regardless of alignment.
-;;
-;; (17 is not a power of 2, which helps avoid obvious repeating patterns)
-
-;; Entered with C=1, exits with C=1
 
 MACRO write_data page
-    ADC via_t2_counter_l + (page AND 1) ; 4 - test 1: T2-L/H loaded with FF, so A unchanged
-    STA page * &100, Y                  ; 5
-    CMP (0, X)                          ; 6 - waste 6 cycles with a few bytes as possible
-    SEC                                 ; 2
+    ADC data_table, X
+    STA page * &100, Y
+    SEC
 ENDMACRO
 
 ;; The compare_data macro compares the data in a memory page to a reference
@@ -133,82 +103,53 @@ ENDMACRO
 ;;
 ;; This macro mirrors the read_data macro
 ;;
-;; In the final test, it's critical that the VIA T2 counter values
-;; exactly match those used when the data was written. This means the
-;; macro must also take exactly 11 cycles. As it contains a forward
-;; branch instruction, this must never cross a page boundary. The
-;; easiest way to guarantee this is to pad the macro to 16 bytes,
-;; and then carefully pick an initial alignment.
-;;
-;; This macro is 16 bytes and is cascaded 128 times (once for each page
-;; begin tested) which adds up to 2048 bytes.
-;;
-;; This macro takes 17 cycles, in the happy case, and if the branch
-;; does not cross a page boundary.
-;;
-;; Entered with C=1, exits with C=1
-;;
-;; (1) and (2) must be in the same page to avoid page crossing penatly
-;; => macro must be aligned to xxx6 -> xxx0
-;;
 MACRO compare_data page
-    ADC via_t2_counter_l + (page AND 1) ; 4 +00 - test 1: T2-L/H loaded with FF, so A unchanged
-    SEC                                 ; 2 +03
-    TAX                                 ; 2 +04 - save the reference value
-    EOR page * &100, Y                  ; 4 +05 - use EOR rather than CMP so we have a record of the error
-    BEQ next                            ; 3 +08
-    TXS                                 ;   +0A - (1)
-    LDX #page                           ;   +0B
+    TSX
+    ADC data_table, X
+    SEC
+    TAX
+    EOR page * &100, Y
+    BEQ next
+    TXS
+    LDX #page
 IF page = page_end
     BCS fail
 ELSE
-    BCS P%+16                           ;   +0D
+    BCS P%+17
 ENDIF
-.next                                   ;   +0D
-    TXA                            ; 8A ; 2 +0F - (2) restore the reference value
-ENDMACRO
-
-;; The make_aligned macro forces the next instruction to be 16-byte aligned
-
-MACRO make_aligned
-    JMP align
-    ALIGN 16
-.align
+.next
+    TXA
 ENDMACRO
 
 ;; The loop_header macro is at the start of write or compare phase.
 ;;
-;; It sets the VIA t2 counter to the required value for that test:
-;;    test 1: ACR=&A0; t2_h=&FF; t2_l=&FF => Data unchanged
-;;    test 2: ACR=&60; t2_h=&00; t2_l=&FF => Data incremented by one
-;;    test 3: ACR=&00; t2_h=&FF; t2_l=&FF => Data randomly perturbed
+;; 00..1F A = pattern?S
+;; 20..3F A = FF
+;; 40..3F A = S
 ;;
-;; must exit with:
-;;   A = test data/anchor/seed
-;;   X = unchanged (it's the patten loop counter)
+;; On Entry:
+;;   S = test number (00-5F)
+;;
+;; on Exit:
+;;   A = Test data/anchor/seed)
+;;   S = test number (00-5F)
+;;   X = test number (00-5F)
 ;;   Y = 00
 ;;   C = 1
 ;;
-;; Alignment must end up between xxx6 and xxx0 to avoid page crossing in write_data
-;;
-;; Currently alignment ends up at xxxA
 
 MACRO loop_header
-    ;; Test 1 - VIA T2 = FF FF ; A = pattern
-    ;; Test 3 - VIA T2 = FF FF ; A = pattern
-    LDY #&FF
+    TSX
+    TXA
+    CPX #&40
+    BCS continue
+    LDA #&FF
+    CPX #&20
+    BCS continue
     LDA pattern_list, X
-    BIT via_acr
-    BVC store
-    ;; Test 2 - VIA T2 = 00 00 ; A = FF
-    TYA
-    INY
-.store
-    make_aligned
-    TXS
+.continue
+    TSX
     SEC
-    STY via_t2_counter_l
-    STY via_t2_counter_h
     LDY #&00
 ENDMACRO
 
@@ -216,15 +157,14 @@ ENDMACRO
 ;;
 
 MACRO loop_footer loop_start
-    make_aligned
     TSX
-    BIT via_acr             ;; Bit 7 of the ACR set indicates test 1
-    BMI skip_correction     ;; Test 2/3 correct test data at end of each col
+    CPX #&20
+    BCC skip_correction
     SBC #num_pages
     CLC
-    ADC increment_list, X
-    SEC
+    ADC increment_list - &20, X
 .skip_correction
+    SEC
     INY
     BEQ loop_exit
     JMP loop_start
@@ -414,7 +354,7 @@ ENDMACRO
     LDY #&00
     out_clear_screen TRUE, TRUE
 
-    LDX #(msg_title - messages)
+    LDA #(msg_title - messages)
     LDY #(row_title - screen_base)
     JMP test_first_time
 
@@ -452,29 +392,33 @@ ENDIF
     ;; The ACR is also in effect tracking whether we are in test 1, 2 or 3
     ;; (as we don't want to assume any RAM is useable).
 
-    LDX #(msg_test1 - messages)
+    LDA #(msg_test1 - messages)
     LDY #(row_test - screen_base)
 
 .test_first_time
-    LDA #acr_test1
-
-.test_loop1
-    STA via_acr
-
-    out_message_multiline row_title
 
     ;; X is the loop iterator for the different fixed patterns
     LDX #&00
+    TXS
+
+.test_loop1
+
+    TAX
+    out_message_multiline row_title
 
 .test_loop2
 
     ;; Output the current pattern to the right place on the screen
+
+    ;; Calculate the pattern/increment/seed
+    TSX
+    TXA
+    AND #&1F
+    CPX #&20
+    BCS not_pattern_test
     LDA pattern_list, X
-    BIT via_acr
-    BVC not_test2
-    LDA increment_list, X
-.not_test2
-    out_hex_a row_data+&06
+.not_pattern_test
+    out_hex_a row_data+&06   ;; X->S then S->X
 
     ;; At the start of a write phase, reset the VIA T2 counter to a deterministic state
     loop_header
@@ -551,8 +495,11 @@ ENDIF
     BVC exit
 
     ;; Move on to the next pattern
+    TSX
     INX
-    CPX #pattern_list_end - pattern_list
+    TXS
+    TXA
+    AND #&1F
     BEQ next_test
     JMP test_loop2
 
@@ -577,10 +524,9 @@ ENDIF
 .next_test
     ;; The ACR is used to distingish the test (as we have no RAM and no spare registers)
     LDY #(row_test - screen_base)
-    LDA via_acr
-    CMP #acr_test1
+    CPX #&20
     BEQ test2
-    CMP #acr_test2
+    CPX #&40
     BEQ test3
 
 .success
@@ -589,14 +535,12 @@ ENDIF
 
 .test2
     ;; Get setup for test 2
-    LDA #acr_test2
-    LDX #(msg_test2 - messages)
+    LDA #(msg_test2 - messages)
     JMP test_loop1
 
 .test3
     ;; Get setup for test 3
-    LDA #acr_test3
-    LDX #(msg_test3 - messages)
+    LDA #(msg_test3 - messages)
     JMP test_loop1
 
 .fail
@@ -771,6 +715,20 @@ ENDIF
     EQUS "NMI!!"
     EQUB 0
 
+;; ******************************************************************
+;; Data Table
+;; ******************************************************************
+
+.data_table
+FOR i, 0, 31
+    EQUB &FF
+NEXT
+FOR i, 0, 31
+    EQUB &00
+NEXT
+FOR i, 0, 31
+    EQUB RND(256)
+NEXT
 
 ;; ******************************************************************
 ;; Increment data
@@ -797,7 +755,18 @@ ENDIF
     EQUB &11
     EQUB &12
     EQUB &13
-
+    EQUB &14
+    EQUB &15
+    EQUB &16
+    EQUB &17
+    EQUB &18
+    EQUB &19
+    EQUB &1A
+    EQUB &1B
+    EQUB &1C
+    EQUB &1D
+    EQUB &1E
+    EQUB &1F
 
 ;; ******************************************************************
 ;; Pattern data
@@ -824,6 +793,18 @@ ENDIF
     EQUB &DF
     EQUB &BF
     EQUB &7F
+    EQUB &14
+    EQUB &15
+    EQUB &16
+    EQUB &17
+    EQUB &18
+    EQUB &19
+    EQUB &1A
+    EQUB &1B
+    EQUB &1C
+    EQUB &1D
+    EQUB &1E
+    EQUB &1F
 .pattern_list_end
 
 ;; ******************************************************************

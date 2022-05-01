@@ -410,6 +410,13 @@ ENDMACRO
     LDA #screen_init
     STA &B000
 
+    LDY #&FF
+    STY &B802
+    STY &B803
+    INY
+    STY &B800
+    STY &B801
+
 ;; Clear the screen
     LDY #&00
     out_clear_screen TRUE, TRUE
@@ -580,8 +587,8 @@ ENDIF
     LDA via_acr
     CMP #acr_test1
     BEQ test2
-    CMP #acr_test2
-    BEQ test3
+;;    CMP #acr_test2
+;;    BEQ test3
 
 .success
     ;; Yeeehhh! All the tests have passed
@@ -612,6 +619,9 @@ ENDIF
     ;; FAILED AT ???? W:?? R:??
     STX via_tmp1      ;; via_tmp1 = MSB of address
     STA via_tmp2      ;; via_tmp2 = error
+
+    LDA #&FF
+    STA &B800
 
     ;; Reference value
     TSX

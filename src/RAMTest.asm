@@ -43,6 +43,9 @@ page_end3        =? &FE
 ;; Whether to display test cycles count (set to zero to disable this feature)
 count_digits     =? 3
 
+;; Whether to read the CPU speed from BFFE (assuming YARRB)
+include_speed    =? TRUE
+
 ;; ******************************************************************
 ;; Calculated parameters
 ;; ******************************************************************
@@ -463,6 +466,24 @@ ENDIF
 
     out_message_multiline row_title
 
+IF (include_speed)
+    ;; Fill in the speed, assuming YARRB
+    ;; x00x xxxx -> 1MHz
+    ;; x10x xxxx -> 2MHz
+    ;; xx1x xxxx -> 4MHz
+    LDA &BFFE
+    AND #&60
+    BEQ skip_update_speed
+    AND #&20
+    ASL A
+    ASL A
+    ASL A    ;; C=0 for 2MHz, 1 for 4MHz
+    ADC #&33
+    AND #&FE
+    STA row_title + &10
+.skip_update_speed
+ENDIF
+
     ;; X is the loop iterator for the different fixed patterns
     LDX #&00
 
@@ -693,6 +714,9 @@ MAPCHAR &40,&5F,&00
 
 .msg_title
     EQUS "ATOM RAM TEST"
+IF (include_speed)
+    EQUS " - 1MHZ"
+ENDIF
     EQUB &80
 
     EQUS "TESTING PAGES "
